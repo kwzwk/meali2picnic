@@ -60,3 +60,5 @@ DATA_DIR=./data uvicorn app.main:app --reload --port 8080
 - Product matching is a text search on the ingredient name, so clean Mealie food names
   ("Zwiebel", not "2 mittelgroße Zwiebeln, gewürfelt") match best. Always glance at the review step.
 - Tested offline against mocked responses, not against live Mealie/Picnic accounts.
+
+- Needs Python 3.13 or newer (required by `python-picnic-api2`); the Docker image already uses it.
