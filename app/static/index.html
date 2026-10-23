@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>meali2picnic</title>
+<style>
+  :root {
+    --bg: #faf7f2; --card: #fff; --ink: #2a2622; --muted: #7a7168; --line: #e8e1d6;
+    --accent: #e1171e; --accent-ink: #fff; --ok: #2f7d4f; --warn: #b26a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #171512; --card: #211e1a; --ink: #f1ece4; --muted: #a39a8e; --line: #3a352e; --ok: #6cc28e; --warn: #e0a64a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 20px 16px 80px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  section h2 { font-size: 1.05rem; margin: 0 0 12px; display: flex; gap: 8px; align-items: center; }
+  .n { background: var(--accent); color: var(--accent-ink); border-radius: 50%; width: 24px; height: 24px; display: inline-grid; place-items: center; font-size: .85rem; }
+  input, select, button { font: inherit; color: inherit; }
+  input[type=text], input[type=password], input[type=number], select {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-width: 100%;
+  }
+  button { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px; padding: 9px 16px; cursor: pointer; font-weight: 600; }
+  button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .grow { flex: 1; min-width: 160px; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .recipes { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .recipes label { display: flex; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .recipes label:last-child { border-bottom: 0; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+  .chip { background: var(--bg); border: 1px solid var(--line); border-radius: 99px; padding: 2px 10px; font-size: .85rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: .8rem; color: var(--muted); font-weight: 500; padding: 4px 6px; }
+  td { padding: 8px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+  td select { width: 100%; }
+  td input[type=number] { width: 64px; }
+  .note { color: var(--warn); font-size: .82rem; }
+  .ok { color: var(--ok); }
+  .err { color: var(--accent); }
+  .hidden { display: none; }
+  .total { font-weight: 600; }
+  @media (max-width: 620px) { th:nth-child(2), td:nth-child(2) { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>meali<span>2</span>picnic</h1>
+  <p class="sub">Pick Mealie recipes, check the matched Picnic products, fill your Picnic cart. You still place the order in the Picnic app.</p>
+
+  <section id="login" class="hidden">
+    <h2><span class="n">1</span> Connect Picnic</h2>
+    <form id="loginForm">
+      <div class="row">
+        <input class="grow" type="text" id="user" placeholder="Picnic email or phone" autocomplete="username" required>
+        <input class="grow" type="password" id="pass" placeholder="Password" autocomplete="current-password" required>
+        <select id="country"><option>DE</option><option>NL</option><option>FR</option></select>
+        <button>Log in</button>
+      </div>
+    </form>
+    <form id="codeForm" class="hidden">
+      <div class="row">
+        <input type="text" id="code" inputmode="numeric" placeholder="SMS code" autocomplete="one-time-code" required>
+        <button>Verify</button>
+      </div>
+    </form>
+    <div class="muted">Your password is only sent to Picnic and is not stored. Only the session token is kept on this server.</div>
+    <div id="loginMsg"></div>
+  </section>
+
+  <section id="pick" class="hidden">
+    <h2><span class="n">2</span> Choose what to buy</h2>
+    <div class="row">
+      <input class="grow" type="text" id="q" placeholder="Search recipes…">
+      <button class="ghost" id="searchBtn" type="button">Search</button>
+    </div>
+    <div class="recipes" id="recipes"></div>
+    <div class="chips" id="chosen"></div>
+    <div class="row">
+      <label class="muted">Shopping list
+        <select id="shopList"><option value="">none</option></select>
+      </label>
+      <label class="muted">Meal plan, next
+        <input type="number" id="days" min="0" max="31" value="0" style="width:64px"> days (0 = off)
+      </label>
+    </div>
+    <button id="planBtn">Find Picnic products</button>
+    <span id="pickMsg" class="muted"></span>
+  </section>
+
+  <section id="review" class="hidden">
+    <h2><span class="n">3</span> Review and add to cart</h2>
+    <table>
+      <thead><tr><th>Ingredient</th><th>Needed</th><th>Picnic product</th><th>Qty</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="row" style="margin-top:14px">
+      <label class="muted"><input type="checkbox" id="clearFirst"> Empty the Picnic cart first</label>
+    </div>
+    <div class="row">
+      <button id="cartBtn">Add to Picnic cart</button>
+      <span id="reviewMsg"></span>
+    </div>
+    <div class="muted">Set the quantity to 0 to skip a line. Your product choices are remembered for next time.</div>
+  </section>
+
+  <div class="muted"><a href="#" id="logout" class="hidden">Log out of Picnic</a></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => {
+  const e = Object.assign(document.createElement(tag), props);
+  kids.forEach((k) => e.append(k));
+  return e;
+};
+const chosen = new Map();   // slug -> name
+let plan = [];
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || r.statusText);
+  return data;
+}
+const msg = (id, text, cls = "") => { $(id).textContent = text; $(id).className = cls; };
+const euro = (c) => (c == null ? "" : (c / 100).toFixed(2) + " €");
+
+async function init() {
+  const s = await api("/api/status");
+  $("country").value = s.default_country;
+  $("login").classList.toggle("hidden", s.picnic_logged_in);
+  $("logout").classList.toggle("hidden", !s.picnic_logged_in);
+  if (!s.mealie_configured) {
+    msg("pickMsg", "MEALIE_URL / MEALIE_TOKEN are not set on the server.", "err");
+  }
+  $("pick").classList.toggle("hidden", !s.picnic_logged_in);
+  if (s.picnic_logged_in && s.mealie_configured) { loadRecipes(); loadLists(); }
+}
+
+$("loginForm").onsubmit = async (e) => {
+  e.preventDefault();
+  msg("loginMsg", "Logging in…");
+  try {
+    const r = await api("/api/picnic/login", { username: $("user").value, password: $("pass").value, country: $("country").value });
+    $("pass").value = "";
+    if (r.need_2fa) { $("codeForm").classList.remove("hidden"); msg("loginMsg", "Picnic sent you an SMS code."); }
+    else init();
+  } catch (err) { msg("loginMsg", err.message, "err"); }
+};
+$("codeForm").onsubmit = async (e) => {
+  e.preventDefault();
+  try { await api("/api/picnic/2fa", { code: $("code").value }); $("codeForm").classList.add("hidden"); init(); }
+  catch (err) { msg("loginMsg", err.message, "err"); }
+};
+$("logout").onclick = async (e) => { e.preventDefault(); await api("/api/picnic/logout", {}); $("review").classList.add("hidden"); init(); };
+
+async function loadRecipes() {
+  try {
+    const list = await api("/api/recipes?q=" + encodeURIComponent($("q").value));
+    const box = $("recipes");
+    box.replaceChildren();
+    if (!list.length) box.append(el("div", { className: "muted", style: "padding:10px" }, "No recipes found."));
+    list.forEach((r) => {
+      const cb = el("input", { type: "checkbox", checked: chosen.has(r.slug) });
+      cb.onchange = () => { cb.checked ? chosen.set(r.slug, r.name) : chosen.delete(r.slug); renderChosen(); };
+      box.append(el("label", {}, cb, el("span", {}, r.name)));
+    });
+  } catch (err) { msg("pickMsg", err.message, "err"); }
+}
+async function loadLists() {
+  try {
+    const lists = await api("/api/shopping-lists");
+    $("shopList").replaceChildren(el("option", { value: "" }, "none"), ...lists.map((l) => el("option", { value: l.id }, l.name)));
+  } catch { /* shopping lists are optional */ }
+}
+function renderChosen() {
+  $("chosen").replaceChildren(...[...chosen.values()].map((n) => el("span", { className: "chip" }, n)));
+}
+$("searchBtn").onclick = loadRecipes;
+$("q").onkeydown = (e) => { if (e.key === "Enter") loadRecipes(); };
+
+$("planBtn").onclick = async () => {
+  const days = parseInt($("days").value, 10) || null;
+  msg("pickMsg", "Searching Picnic, this takes a few seconds…");
+  $("planBtn").disabled = true;
+  try {
+    const r = await api("/api/plan", { recipes: [...chosen.keys()], shopping_list: $("shopList").value || null, mealplan_days: days });
+    plan = r.rows;
+    renderPlan();
+    msg("pickMsg", `${plan.length} ingredients.`);
+  } catch (err) { msg("pickMsg", err.message, "err"); }
+  $("planBtn").disabled = false;
+};
+
+function renderPlan() {
+  $("review").classList.remove("hidden");
+  $("rows").replaceChildren(...plan.map((row, i) => {
+    const sel = el("select");
+    if (!row.candidates.length) sel.append(el("option", { value: "" }, "no match"));
+    row.candidates.forEach((c) => {
+      const label = `${c.name}${c.unit_quantity ? " · " + c.unit_quantity : ""}${c.price ? " · " + euro(c.price) : ""}`;
+      sel.append(el("option", { value: c.id, selected: c.id === row.selected }, label));
+    });
+    sel.onchange = () => { row.selected = sel.value; };
+    const qty = el("input", { type: "number", min: 0, max: 99, value: row.count });
+    qty.onchange = () => { row.count = parseInt(qty.value, 10) || 0; };
+    const need = el("td", {}, row.needed);
+    const prod = el("td", {}, sel);
+    if (row.note) prod.append(el("div", { className: "note" }, row.note));
+    return el("tr", {},
+      el("td", {}, row.ingredient, row.remembered ? el("div", { className: "muted" }, "remembered") : ""),
+      need, prod, el("td", {}, qty));
+  }));
+}
+
+$("cartBtn").onclick = async () => {
+  const lines = plan.filter((r) => r.selected && r.count > 0)
+    .map((r) => ({ ingredient: r.ingredient, product_id: r.selected, count: r.count }));
+  if (!lines.length) return msg("reviewMsg", "Nothing to add.", "err");
+  $("cartBtn").disabled = true;
+  msg("reviewMsg", "Adding…");
+  try {
+    const r = await api("/api/cart", { lines, clear_first: $("clearFirst").checked });
+    msg("reviewMsg", `Done. Your cart has ${r.total_count} items (about ${r.total_price.toFixed(2)} €). Open the Picnic app to order.`, "ok");
+  } catch (err) { msg("reviewMsg", err.message, "err"); }
+  $("cartBtn").disabled = false;
+};
+
+init();
+</script>
+</body>
+</html>
