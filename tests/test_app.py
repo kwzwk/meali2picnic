@@ -29,6 +29,8 @@ CATALOG = {
     "spaghetti": [NS(id="s1", name="Barilla Spaghetti", display_price=199, unit_quantity="500 g"),
                   NS(id="s2", name="Bio Spaghetti", display_price=249, unit_quantity="250 g")],
     "zwiebel": [NS(id="z1", name="Zwiebeln", display_price=129, unit_quantity="1 kg")],
+    "hähnchenbrustfilet": [NS(id="h1", name="Hähnchenbrustfilet", display_price=599, unit_quantity="400 g")],
+    "gochujang paste": [NS(id="g1", name="Gochujang Paste", display_price=349, unit_quantity="200 g")],
 }
 ADDED = []
 
@@ -205,3 +207,78 @@ def test_plan_searches_in_german_and_research_endpoint():
     assert rows[0]["selected"] == "z1"
     r = client.post("/api/research", json={"ingredient": "onions", "term": "zwiebel", "amounts": {"": 2.0}}).json()
     assert r["selected"] == "z1" and r["search_term"] == "zwiebel"
+
+
+# ---------------------------------------------------------------- learning dictionary
+from app.dictionary import Dictionary  # noqa: E402
+
+
+def test_dictionary_learns_and_forgets(tmp_path):
+    d = Dictionary(tmp_path)
+    assert d.translate("gochujang") == ("gochujang", False)
+    d.note_unknown("Gochujang", found=False)
+    d.note_unknown("gochujang", found=False)               # same name again: counted, not duplicated
+    d.note_unknown("Hähnchenbrustfilet", found=True)
+    rows = d.untranslated()
+    assert [r["name"] for r in rows] == ["gochujang", "hähnchenbrustfilet"]   # no-match first
+    assert rows[0]["seen"] == 2 and rows[0]["found"] is False
+
+    d.set("Gochujang", "Gochujang Paste")
+    assert d.translate("gochujang") == ("Gochujang Paste", True)
+    assert d.translate("red gochujang") == ("Gochujang Paste", True)        # tail match still works
+    assert [r["name"] for r in d.untranslated()] == ["hähnchenbrustfilet"]  # taught names leave the list
+
+
+def test_dictionary_keep_as_is_and_keep_found(tmp_path):
+    d = Dictionary(tmp_path)
+    d.note_unknown("hähnchenbrustfilet", found=True)
+    d.note_unknown("sumac", found=False)
+    assert d.keep_found() == 1                              # only the one that finds products
+    assert d.translate("hähnchenbrustfilet") == ("hähnchenbrustfilet", True)
+    assert [r["name"] for r in d.untranslated()] == ["sumac"]
+    d.set("sumac", "")                                      # empty = keep as is
+    assert d.untranslated() == []
+
+
+def test_dictionary_file_edits_in_place_and_validates(tmp_path):
+    d = Dictionary(tmp_path)
+    d.file.write_text("# my words\nsumac = Sumach\nonion = Gemüsezwiebel\n")
+    d.set("sumac", "Sumach-Gewürz")                         # replaces its line, keeps comment and others
+    assert d.file.read_text().splitlines() == ["# my words", "sumac = Sumach-Gewürz", "onion = Gemüsezwiebel"]
+    for bad in ("a;b", "a=b", "a\nb"):
+        try:
+            d.set("tofu", bad)
+            raise AssertionError("should have rejected " + repr(bad))
+        except ValueError:
+            pass
+    d.set("kimchi", "Kimchi")
+    assert d.file.read_text().endswith("kimchi = Kimchi\n")
+
+
+def test_unwritable_unknown_list_never_breaks_planning(tmp_path, monkeypatch):
+    from pathlib import Path
+    d = Dictionary(tmp_path)
+    monkeypatch.setattr(Path, "write_text", lambda *a, **k: (_ for _ in ()).throw(PermissionError(13, "denied")))
+    d.note_unknown("sumac", found=False)                    # must not raise
+
+
+def test_api_unknown_names_are_listed_then_taught():
+    RECIPES["kor"] = {"name": "Kor", "slug": "kor", "recipeIngredient": [
+        {"quantity": 1, "unit": None, "food": {"name": "gochujang"}},
+        {"quantity": 400, "unit": {"name": "g"}, "food": {"name": "Hähnchenbrustfilet"}}]}
+    rows = {r["ingredient"]: r for r in client.post("/api/plan", json={"recipes": ["kor"]}).json()["rows"]}
+    assert rows["gochujang"]["translated"] is False and rows["gochujang"]["selected"] is None   # nothing found
+    assert rows["hähnchenbrustfilet"]["translated"] is False and rows["hähnchenbrustfilet"]["selected"] == "h1"
+
+    listed = {u["name"]: u for u in client.get("/api/translations").json()["untranslated"]}
+    assert listed["gochujang"]["found"] is False and listed["hähnchenbrustfilet"]["found"] is True
+
+    r = client.post("/api/translations", json={"english": "gochujang", "german": "Gochujang Paste"}).json()
+    assert "gochujang" not in [u["name"] for u in r["untranslated"]]
+    rows = {r["ingredient"]: r for r in client.post("/api/plan", json={"recipes": ["kor"]}).json()["rows"]}
+    assert rows["gochujang"]["translated"] is True
+    assert rows["gochujang"]["search_term"] == "Gochujang Paste" and rows["gochujang"]["selected"] == "g1"
+
+    kept = client.post("/api/translations/keep-found").json()
+    assert "hähnchenbrustfilet" not in [u["name"] for u in kept["untranslated"]]
+    assert client.post("/api/translations", json={"english": "x", "german": "a;b"}).status_code == 400

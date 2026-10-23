@@ -12,7 +12,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import core, translate
+from . import core
+from .dictionary import Dictionary
 from .picnic_session import DATA_DIR, Picnic2FAError, PicnicSession
 
 app = FastAPI(title="meali2picnic")
@@ -63,13 +64,13 @@ def load_json(path: Path) -> dict:
         return {}
 
 
-TRANSLATE_FILE = DATA_DIR / "translations.txt"   # your own "english = deutsch" lines
 TRANSLATE_ON = os.environ.get("TRANSLATE_INGREDIENTS", "en-de").lower() == "en-de"
+dictionary = Dictionary(DATA_DIR)
 
 
-def search_term(name: str) -> str:
-    """The word we actually search Picnic for (German, if translation is on)."""
-    return translate.translate(name, translate.load_overrides(TRANSLATE_FILE)) if TRANSLATE_ON else name
+def search_term(name: str) -> tuple[str, bool]:
+    """(the word we search Picnic for, whether the dictionary knew the name)."""
+    return dictionary.translate(name) if TRANSLATE_ON else (name, True)
 
 
 def skip_set() -> set[str]:
@@ -175,6 +176,39 @@ def research(body: ResearchBody):
     return row
 
 
+class TranslationBody(BaseModel):
+    english: str
+    german: str = ""
+
+
+@app.get("/api/translations")
+def translations():
+    """Ingredient names the dictionary doesn't know yet."""
+    return {"untranslated": dictionary.untranslated()}
+
+
+@app.post("/api/translations")
+def save_translation(body: TranslationBody):
+    """Teach the dictionary. An empty translation means 'keep this name as it is'."""
+    try:
+        dictionary.set(body.english, body.german)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except OSError as e:
+        raise HTTPException(500, f"Could not save the dictionary ({e}). Make {DATA_DIR} writable for uid 10001.")
+    return {"untranslated": dictionary.untranslated()}
+
+
+@app.post("/api/translations/keep-found")
+def keep_found():
+    """Mark every untranslated name that already finds Picnic products as fine as written."""
+    try:
+        n = dictionary.keep_found()
+    except OSError as e:
+        raise HTTPException(500, f"Could not save the dictionary ({e}).")
+    return {"kept": n, "untranslated": dictionary.untranslated()}
+
+
 class PlanBody(BaseModel):
     recipes: list[str] = []
     shopping_list: str | None = None
@@ -197,12 +231,14 @@ def plan(body: PlanBody):
 
     rows = []
     for name, entry in merged.items():
-        term = search_term(name)
+        term, known = search_term(name)
         hits = api.search(term).items[:6]
         if not hits and term != name:         # translation found nothing: try the original wording too
             hits = api.search(name).items[:6]
+        if not known:
+            dictionary.note_unknown(name, bool(hits))
         row = build_row(api, name, entry["amounts"], hits, mappings.get(name))
-        row.update({"search_term": term, "from": entry["displays"], "remembered": name in mappings})
+        row.update({"search_term": term, "translated": known, "from": entry["displays"], "remembered": name in mappings})
         rows.append(row)
     return {"rows": rows}
 

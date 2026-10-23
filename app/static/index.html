@@ -44,6 +44,11 @@
   .note { color: var(--warn); font-size: .82rem; }
   .ok { color: var(--ok); }
   .err { color: var(--accent); }
+  details.trans summary { cursor: pointer; font-weight: 600; }
+  .tr-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+  .tr-row .nm { min-width: 140px; font-weight: 500; }
+  .tag { font-size: .75rem; border-radius: 99px; padding: 1px 8px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.bad { color: var(--warn); border-color: var(--warn); }
   .hidden { display: none; }
   .total { font-weight: 600; }
   @media (max-width: 620px) { th:nth-child(2), td:nth-child(2) { display: none; } }
@@ -110,6 +115,16 @@
     <div class="muted">Set the quantity to 0 to skip a line. Your product choices are remembered for next time.</div>
   </section>
 
+  <section id="trans" class="hidden">
+    <details class="trans" id="transBox">
+      <summary id="transSummary">Translations to review</summary>
+      <p class="muted">Ingredient names the dictionary doesn't know yet are searched as written.
+        Enter the German name and save, or press "Keep as is" if the name is already fine.</p>
+      <div class="row"><button class="ghost" id="keepFound" type="button">Keep as is everything that already finds products</button></div>
+      <div id="transList"></div>
+    </details>
+  </section>
+
   <div class="muted"><a href="#" id="logout" class="hidden">Log out of Picnic</a></div>
 </main>
 
@@ -143,6 +158,8 @@ async function init() {
     msg("pickMsg", "MEALIE_URL / MEALIE_TOKEN are not set on the server.", "err");
   }
   $("pick").classList.toggle("hidden", !s.picnic_logged_in);
+  $("trans").classList.toggle("hidden", !s.picnic_logged_in);
+  if (s.picnic_logged_in) loadTranslations();
   if (s.picnic_logged_in && s.mealie_configured) { loadRecipes(); loadLists(); }
 }
 
@@ -201,9 +218,36 @@ $("planBtn").onclick = async () => {
     const r = await api("/api/plan", { recipes: [...chosen.keys()], shopping_list: $("shopList").value || null, mealplan_days: days });
     plan = r.rows;
     renderPlan();
+    loadTranslations();
     msg("pickMsg", `${plan.length} ingredients.`);
   } catch (err) { msg("pickMsg", err.message, "err"); }
   $("planBtn").disabled = false;
+};
+
+function renderTranslations(list) {
+  $("transSummary").textContent = list.length ? `Translations to review (${list.length})` : "Translations to review (none)";
+  $("transList").replaceChildren(...list.map((t) => {
+    const input = el("input", { type: "text", placeholder: "German name", className: "grow" });
+    const save = async (german) => {
+      try { renderTranslations((await api("/api/translations", { english: t.name, german })).untranslated); }
+      catch (err) { msg("transMsg", err.message, "err"); }
+    };
+    const saveBtn = el("button", { type: "button" }, "Save");
+    saveBtn.onclick = () => input.value.trim() && save(input.value.trim());
+    input.onkeydown = (e) => { if (e.key === "Enter") saveBtn.click(); };
+    const keep = el("button", { type: "button", className: "ghost" }, "Keep as is");
+    keep.onclick = () => save("");
+    return el("div", { className: "tr-row" },
+      el("span", { className: "nm" }, t.name),
+      el("span", { className: "tag" + (t.found ? "" : " bad") }, t.found ? "finds products" : "no match"),
+      input, saveBtn, keep);
+  }), el("div", { id: "transMsg", className: "muted" }));
+}
+async function loadTranslations() {
+  try { renderTranslations((await api("/api/translations")).untranslated); } catch { /* optional */ }
+}
+$("keepFound").onclick = async () => {
+  try { renderTranslations((await api("/api/translations/keep-found", {})).untranslated); } catch (err) { msg("transMsg", err.message, "err"); }
 };
 
 function productOptions(sel, row) {
@@ -235,14 +279,24 @@ function renderPlan() {
         qty.value = row.count;
         note.textContent = row.note || "";
         termLine.textContent = `searched: ${row.search_term}`;
+        remember.style.display = row.candidates.length && row.search_term !== row.ingredient ? "" : "none";
       } catch (err) { note.textContent = err.message; }
     };
     const termLine = el("div", { className: "muted" },
       row.search_term && row.search_term !== row.ingredient ? `searched: ${row.search_term}` : "");
+    const badge = el("div", { className: "note" }, row.translated === false ? "not in dictionary" : "");
+    const remember = el("button", { type: "button", className: "ghost", style: "display:none;margin-top:6px" }, "Remember as translation");
+    remember.onclick = async () => {
+      try {
+        await api("/api/translations", { english: row.ingredient, german: row.search_term });
+        remember.style.display = "none"; badge.textContent = "saved to dictionary";
+        loadTranslations();
+      } catch (err) { note.textContent = err.message; }
+    };
     return el("tr", {},
-      el("td", {}, row.ingredient, termLine, row.remembered ? el("div", { className: "muted" }, "remembered") : ""),
+      el("td", {}, row.ingredient, termLine, badge, row.remembered ? el("div", { className: "muted" }, "remembered") : ""),
       el("td", {}, row.needed),
-      el("td", {}, sel, note, again),
+      el("td", {}, sel, note, again, remember),
       el("td", {}, qty));
   }));
 }

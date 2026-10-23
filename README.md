@@ -39,14 +39,19 @@ internet or put it behind a reverse proxy with HTTPS. Extra ingredients to ignor
 
 Ingredient names are translated from English to German **only for the Picnic search**. Your
 Mealie recipes are not changed. "red onion" searches for "rote Zwiebel", "large fresh basil leaves"
-for "Basilikum". German names, and words the built-in list doesn't know, are searched as they are.
+for "Basilikum". The built-in dictionary covers about 300 common groceries and **learns from you**:
 
-- The review table shows what was searched (`searched: Zwiebel`). If a match is off, type a
-  better search term into the box under the product and press Enter.
-- Add your own words in `data/translations.txt` (one `english = deutsch` per line, `#` for comments).
-  They win over the built-in list, so you can also correct it:
+- Every ingredient name the dictionary doesn't know is searched as written and collected under
+  **"Translations to review"** at the bottom of the page. Names that found no Picnic product are listed first.
+- For each one, type the German name and press Save, or press **Keep as is** if it is already fine
+  (for example a name that is already German). "Keep as is everything that already finds products"
+  clears the harmless ones in one click.
+- In the review table, if a match is off, type a better search term under the product and press Enter.
+  When that finds the right thing, "Remember as translation" saves it to the dictionary.
+- Saved entries take effect immediately, also for similar names ("red gochujang" uses "gochujang").
+- The dictionary is the plain text file `data/translations.txt`, one `english = deutsch` per line
+  (`#` for comments). You can edit it by hand too, and your entries win over the built-in list:
   ```
-  # data/translations.txt
   sumac = Sumach
   onion = Gemüsezwiebel
   ```

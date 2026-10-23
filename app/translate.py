@@ -122,12 +122,20 @@ def _normalise(name: str) -> str:
     return n
 
 
+normalise = _normalise  # the key form used in the dictionary file
+
+
 def translate(name: str, overrides: dict[str, str] | None = None) -> str:
     """Best German search term for an ingredient name. Returns the input unchanged if unsure."""
+    return translate_ex(name, overrides)[0]
+
+
+def translate_ex(name: str, overrides: dict[str, str] | None = None) -> tuple[str, bool]:
+    """(search term, known). known is False when the dictionary had no entry, so the name passes through."""
     table = {**BUILTIN, **(overrides or {})}
     n = _normalise(name)
     if not n:
-        return name
+        return name, True
 
     def lookup(phrase: str):
         for v in _variants(phrase):
@@ -136,9 +144,9 @@ def translate(name: str, overrides: dict[str, str] | None = None) -> str:
         return None
 
     if (hit := lookup(n)) is not None:
-        return hit
+        return hit, True
     words = [w for w in n.split() if w not in _DESCRIPTORS]
     for i in range(len(words)):               # longest known tail: "large red onion" -> "red onion"
         if (hit := lookup(" ".join(words[i:]))) is not None:
-            return hit
-    return name
+            return hit, True
+    return name, False
