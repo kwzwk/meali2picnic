@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import core
+from . import core, translate
 from .picnic_session import DATA_DIR, Picnic2FAError, PicnicSession
 
 app = FastAPI(title="meali2picnic")
@@ -61,6 +61,15 @@ def load_json(path: Path) -> dict:
         return json.loads(path.read_text())
     except Exception:
         return {}
+
+
+TRANSLATE_FILE = DATA_DIR / "translations.txt"   # your own "english = deutsch" lines
+TRANSLATE_ON = os.environ.get("TRANSLATE_INGREDIENTS", "en-de").lower() == "en-de"
+
+
+def search_term(name: str) -> str:
+    """The word we actually search Picnic for (German, if translation is on)."""
+    return translate.translate(name, translate.load_overrides(TRANSLATE_FILE)) if TRANSLATE_ON else name
 
 
 def skip_set() -> set[str]:
@@ -126,6 +135,46 @@ def shopping_lists():
     return [{"id": s["id"], "name": s.get("name") or s["id"]} for s in mealie().shopping_lists()]
 
 
+def build_row(api, name: str, amounts: dict, hits, remembered: str | None) -> dict:
+    cands = [{"id": h.id, "name": h.name, "price": h.display_price, "unit_quantity": h.unit_quantity} for h in hits]
+    selected = remembered
+    if selected and not any(c["id"] == selected for c in cands):
+        try:  # remembered product that isn't in today's top hits
+            art = api.get_article(selected)
+            if art:
+                cands.insert(0, {"id": art.id, "name": art.name, "price": None, "unit_quantity": None})
+        except Exception:
+            selected = None
+    if not selected and cands:
+        selected = cands[0]["id"]
+    chosen = next((c for c in cands if c["id"] == selected), None)
+    count, note = core.packs_needed(amounts, chosen["unit_quantity"] if chosen else None)
+    return {
+        "ingredient": name,
+        "needed": core.describe_amounts(amounts),
+        "amounts": amounts,
+        "candidates": cands,
+        "selected": selected,
+        "count": count if chosen else 0,
+        "note": note if chosen else "no Picnic match",
+    }
+
+
+class ResearchBody(BaseModel):
+    ingredient: str
+    term: str
+    amounts: dict[str, float] = {}
+
+
+@app.post("/api/research")
+def research(body: ResearchBody):
+    """Search Picnic again with a term you typed for one ingredient."""
+    api = need_picnic()
+    row = build_row(api, body.ingredient, body.amounts, api.search(body.term).items[:6], None)
+    row["search_term"] = body.term
+    return row
+
+
 class PlanBody(BaseModel):
     recipes: list[str] = []
     shopping_list: str | None = None
@@ -148,31 +197,13 @@ def plan(body: PlanBody):
 
     rows = []
     for name, entry in merged.items():
-        hits = api.search(name).items[:6]
-        cands = [{"id": h.id, "name": h.name, "price": h.display_price, "unit_quantity": h.unit_quantity}
-                 for h in hits]
-        selected = mappings.get(name)
-        if selected and not any(c["id"] == selected for c in cands):
-            try:  # remembered product that isn't in today's top hits
-                art = api.get_article(selected)
-                if art:
-                    cands.insert(0, {"id": art.id, "name": art.name, "price": None, "unit_quantity": None})
-            except Exception:
-                selected = None
-        if not selected and cands:
-            selected = cands[0]["id"]
-        chosen = next((c for c in cands if c["id"] == selected), None)
-        count, note = core.packs_needed(entry["amounts"], chosen["unit_quantity"] if chosen else None)
-        rows.append({
-            "ingredient": name,
-            "needed": core.describe_amounts(entry["amounts"]),
-            "from": entry["displays"],
-            "candidates": cands,
-            "selected": selected,
-            "count": count if chosen else 0,
-            "note": note if chosen else "no Picnic match",
-            "remembered": name in mappings,
-        })
+        term = search_term(name)
+        hits = api.search(term).items[:6]
+        if not hits and term != name:         # translation found nothing: try the original wording too
+            hits = api.search(name).items[:6]
+        row = build_row(api, name, entry["amounts"], hits, mappings.get(name))
+        row.update({"search_term": term, "from": entry["displays"], "remembered": name in mappings})
+        rows.append(row)
     return {"rows": rows}
 
 

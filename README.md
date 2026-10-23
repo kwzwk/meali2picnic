@@ -27,12 +27,31 @@ Open http://localhost:8080.
 | `MEALIE_URL` | Your Mealie base URL. Must be reachable from the container (same compose network: `http://mealie:9000`) |
 | `MEALIE_TOKEN` | Mealie: user profile, API Tokens |
 | `PICNIC_COUNTRY` | `DE` (default), `NL` or `FR` |
+| `TRANSLATE_INGREDIENTS` | `en-de` (default) translates ingredient names for the Picnic search, `off` disables it |
 | `APP_USER` / `APP_PASSWORD` | HTTP Basic auth for the whole app. **Set a password** unless it is only reachable from your own machine |
 
 `./data` is mounted at `/data` and holds the Picnic session token and your remembered product
 choices. Anyone who can open the app can use your Picnic session, so keep the port off the
 internet or put it behind a reverse proxy with HTTPS. Extra ingredients to ignore can be added to
 `data/skip.txt`, one per line.
+
+## Translation (English recipes, German Picnic)
+
+Ingredient names are translated from English to German **only for the Picnic search**. Your
+Mealie recipes are not changed. "red onion" searches for "rote Zwiebel", "large fresh basil leaves"
+for "Basilikum". German names, and words the built-in list doesn't know, are searched as they are.
+
+- The review table shows what was searched (`searched: Zwiebel`). If a match is off, type a
+  better search term into the box under the product and press Enter.
+- Add your own words in `data/translations.txt` (one `english = deutsch` per line, `#` for comments).
+  They win over the built-in list, so you can also correct it:
+  ```
+  # data/translations.txt
+  sumac = Sumach
+  onion = Gemüsezwiebel
+  ```
+- Set `TRANSLATE_INGREDIENTS=off` to turn translation off.
+- Your product choices are remembered per original ingredient name, so a corrected match is reused.
 
 ## Command line
 

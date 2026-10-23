@@ -206,24 +206,44 @@ $("planBtn").onclick = async () => {
   $("planBtn").disabled = false;
 };
 
+function productOptions(sel, row) {
+  sel.replaceChildren();
+  if (!row.candidates.length) sel.append(el("option", { value: "" }, "no match"));
+  row.candidates.forEach((c) => {
+    const label = `${c.name}${c.unit_quantity ? " · " + c.unit_quantity : ""}${c.price ? " · " + euro(c.price) : ""}`;
+    sel.append(el("option", { value: c.id, selected: c.id === row.selected }, label));
+  });
+}
+
 function renderPlan() {
   $("review").classList.remove("hidden");
-  $("rows").replaceChildren(...plan.map((row, i) => {
+  $("rows").replaceChildren(...plan.map((row) => {
     const sel = el("select");
-    if (!row.candidates.length) sel.append(el("option", { value: "" }, "no match"));
-    row.candidates.forEach((c) => {
-      const label = `${c.name}${c.unit_quantity ? " · " + c.unit_quantity : ""}${c.price ? " · " + euro(c.price) : ""}`;
-      sel.append(el("option", { value: c.id, selected: c.id === row.selected }, label));
-    });
+    productOptions(sel, row);
     sel.onchange = () => { row.selected = sel.value; };
     const qty = el("input", { type: "number", min: 0, max: 99, value: row.count });
     qty.onchange = () => { row.count = parseInt(qty.value, 10) || 0; };
-    const need = el("td", {}, row.needed);
-    const prod = el("td", {}, sel);
-    if (row.note) prod.append(el("div", { className: "note" }, row.note));
+    const note = el("div", { className: "note" }, row.note || "");
+    const again = el("input", { type: "text", placeholder: "search Picnic again…", style: "margin-top:6px;width:100%" });
+    again.onkeydown = async (e) => {
+      if (e.key !== "Enter" || !again.value.trim()) return;
+      note.textContent = "Searching…";
+      try {
+        const r = await api("/api/research", { ingredient: row.ingredient, term: again.value.trim(), amounts: row.amounts });
+        Object.assign(row, { candidates: r.candidates, selected: r.selected, count: r.count, note: r.note, search_term: r.search_term });
+        productOptions(sel, row);
+        qty.value = row.count;
+        note.textContent = row.note || "";
+        termLine.textContent = `searched: ${row.search_term}`;
+      } catch (err) { note.textContent = err.message; }
+    };
+    const termLine = el("div", { className: "muted" },
+      row.search_term && row.search_term !== row.ingredient ? `searched: ${row.search_term}` : "");
     return el("tr", {},
-      el("td", {}, row.ingredient, row.remembered ? el("div", { className: "muted" }, "remembered") : ""),
-      need, prod, el("td", {}, qty));
+      el("td", {}, row.ingredient, termLine, row.remembered ? el("div", { className: "muted" }, "remembered") : ""),
+      el("td", {}, row.needed),
+      el("td", {}, sel, note, again),
+      el("td", {}, qty));
   }));
 }
 

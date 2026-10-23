@@ -35,7 +35,7 @@ ADDED = []
 
 class FakeAPI:
     def search(self, term):
-        return NS(items=CATALOG.get(term, []))
+        return NS(items=CATALOG.get(term.lower(), []))   # Picnic search is case-insensitive
 
     def get_article(self, _id):
         return None
@@ -150,3 +150,58 @@ def test_unwritable_data_dir_does_not_lose_login(monkeypatch):
     warning = s._save(api, "DE")
     assert s.api is api                       # still logged in this session
     assert "Permission denied" in warning and "10001" in warning
+
+
+# ---------------------------------------------------------------- translation
+from app import translate as tr  # noqa: E402
+
+
+def test_translate_basics():
+    assert tr.translate("onion") == "Zwiebel"
+    assert tr.translate("Garlic") == "Knoblauch"
+    assert tr.translate("tomatoes") == "Tomate"                   # plural
+    assert tr.translate("strawberries") == "Erdbeeren"
+    assert tr.translate("large red onion") == "rote Zwiebel"      # descriptor dropped, phrase kept
+    assert tr.translate("fresh chopped parsley") == "Petersilie"
+    assert tr.translate("chicken breast, skinless") == "Hähnchenbrust"
+    assert tr.translate("ground beef") == "Hackfleisch"
+    assert tr.translate("head of lettuce") == "Salat"
+    assert tr.translate("extra virgin olive oil") == "Olivenöl"
+    assert tr.translate("fresh basil leaves") == "Basilikum"
+    assert tr.translate("bay leaves") == "Lorbeerblätter"        # known phrase wins over dropping "leaves"
+
+
+def test_translate_passes_german_and_unknown_through():
+    assert tr.translate("Zwiebel") == "Zwiebel"
+    assert tr.translate("Hähnchenbrustfilet") == "Hähnchenbrustfilet"
+    assert tr.translate("gochujang") == "gochujang"
+
+
+def test_translate_overrides_win(tmp_path):
+    f = tmp_path / "t.txt"
+    f.write_text("# mine\nonion = Gemüsezwiebel\nsumac = Sumach\n")
+    ov = tr.load_overrides(f)
+    assert tr.translate("onion", ov) == "Gemüsezwiebel"
+    assert tr.translate("sumac", ov) == "Sumach"
+    assert tr.load_overrides(tmp_path / "missing.txt") == {}
+
+
+def test_plan_searches_in_german_and_research_endpoint():
+    searched = []
+    real = FakeAPI.search
+
+    def spy(self, term):
+        searched.append(term)
+        return real(self, term)
+    FakeAPI.search = spy
+    try:
+        RECIPES["eng"] = {"name": "Eng", "slug": "eng", "recipeIngredient": [
+            {"quantity": 2, "unit": None, "food": {"name": "onions"}}]}
+        rows = client.post("/api/plan", json={"recipes": ["eng"]}).json()["rows"]
+        assert searched == ["Zwiebel"]                           # German term hits, no fallback search needed
+    finally:
+        FakeAPI.search = real
+    assert rows[0]["search_term"] == "Zwiebel" and rows[0]["ingredient"] == "onions"
+    assert rows[0]["selected"] == "z1"
+    r = client.post("/api/research", json={"ingredient": "onions", "term": "zwiebel", "amounts": {"": 2.0}}).json()
+    assert r["selected"] == "z1" and r["search_term"] == "zwiebel"

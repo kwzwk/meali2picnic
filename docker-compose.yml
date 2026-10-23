@@ -9,6 +9,7 @@ services:
       MEALIE_URL: ${MEALIE_URL}          # e.g. http://mealie:9000 or https://mealie.example.com
       MEALIE_TOKEN: ${MEALIE_TOKEN}      # Mealie -> user profile -> API Tokens
       PICNIC_COUNTRY: ${PICNIC_COUNTRY:-DE}
+      TRANSLATE_INGREDIENTS: ${TRANSLATE_INGREDIENTS:-en-de}   # off = search Picnic with the names as written
       APP_USER: ${APP_USER:-admin}
       APP_PASSWORD: ${APP_PASSWORD:-}    # set this if the app is reachable beyond your own machine
     volumes:
