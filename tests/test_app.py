@@ -104,7 +104,7 @@ def test_cart_adds_and_remembers_choice():
         {"ingredient": "spaghetti", "product_id": "s2", "count": 4},
         {"ingredient": "zwiebel", "product_id": "z1", "count": 0},   # skipped
     ]})
-    assert r.json() == {"total_count": 4, "total_price": 12.34}
+    assert r.json() == {"total_count": 4, "total_price": 12.34, "warning": None}
     assert ADDED == [("s2", 4)]
     rows = client.post("/api/plan", json={"recipes": ["pasta"]}).json()["rows"]
     sp = next(r for r in rows if r["ingredient"] == "spaghetti")
@@ -135,3 +135,18 @@ def test_basic_auth():
 def test_index_served():
     r = client.get("/")
     assert r.status_code == 200 and "meali" in r.text
+
+
+def test_unwritable_data_dir_does_not_lose_login(monkeypatch):
+    """A /data volume the app can't write to must not break login (this crashed in Docker)."""
+    from pathlib import Path
+    from app.picnic_session import PicnicSession
+
+    def deny(*a, **k):
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(Path, "write_text", deny)
+    s = PicnicSession.__new__(PicnicSession)
+    api = NS(session=NS(auth_token="tok"))
+    warning = s._save(api, "DE")
+    assert s.api is api                       # still logged in this session
+    assert "Permission denied" in warning and "10001" in warning

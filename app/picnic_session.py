@@ -28,12 +28,18 @@ class PicnicSession:
         if token:
             self.api = PicnicAPI(country_code=country, auth_token=token)
 
-    def _save(self, api: PicnicAPI, country: str):
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        TOKEN_FILE.write_text(api.session.auth_token or "")
-        TOKEN_FILE.chmod(0o600)
-        COUNTRY_FILE.write_text(country)
+    def _save(self, api: PicnicAPI, country: str) -> str | None:
+        """Keep the login in memory, then try to persist it. Returns a warning if persisting fails."""
         self.api = api
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            TOKEN_FILE.write_text(api.session.auth_token or "")
+            TOKEN_FILE.chmod(0o600)
+            COUNTRY_FILE.write_text(country)
+        except OSError as e:
+            return (f"Logged in, but the session could not be saved ({e}). "
+                    f"You will have to log in again after a restart. Make {DATA_DIR} writable for uid 10001.")
+        return None
 
     def logged_in(self) -> bool:
         if not self.api:
@@ -54,15 +60,15 @@ class PicnicSession:
             self._pending = api
             self._pending_country = country
             return {"need_2fa": True}
-        self._save(api, country)
-        return {"need_2fa": False}
+        return {"need_2fa": False, "warning": self._save(api, country)}
 
-    def verify_2fa(self, code: str):
+    def verify_2fa(self, code: str) -> str | None:
         if not self._pending:
             raise Picnic2FAError("No login in progress, start again.")
         self._pending.verify_2fa_code(code.strip())
-        self._save(self._pending, self._pending_country)
+        warning = self._save(self._pending, self._pending_country)
         self._pending = None
+        return warning
 
     def logout(self):
         self.api = None

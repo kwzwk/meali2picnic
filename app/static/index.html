@@ -153,12 +153,17 @@ $("loginForm").onsubmit = async (e) => {
     const r = await api("/api/picnic/login", { username: $("user").value, password: $("pass").value, country: $("country").value });
     $("pass").value = "";
     if (r.need_2fa) { $("codeForm").classList.remove("hidden"); msg("loginMsg", "Picnic sent you an SMS code."); }
-    else init();
+    else { await init(); if (r.warning) msg("pickMsg", r.warning, "err"); }
   } catch (err) { msg("loginMsg", err.message, "err"); }
 };
 $("codeForm").onsubmit = async (e) => {
   e.preventDefault();
-  try { await api("/api/picnic/2fa", { code: $("code").value }); $("codeForm").classList.add("hidden"); init(); }
+  try {
+    const r = await api("/api/picnic/2fa", { code: $("code").value });
+    $("codeForm").classList.add("hidden");
+    await init();
+    if (r.warning) msg("pickMsg", r.warning, "err");
+  }
   catch (err) { msg("loginMsg", err.message, "err"); }
 };
 $("logout").onclick = async (e) => { e.preventDefault(); await api("/api/picnic/logout", {}); $("review").classList.add("hidden"); init(); };
@@ -230,7 +235,7 @@ $("cartBtn").onclick = async () => {
   msg("reviewMsg", "Adding…");
   try {
     const r = await api("/api/cart", { lines, clear_first: $("clearFirst").checked });
-    msg("reviewMsg", `Done. Your cart has ${r.total_count} items (about ${r.total_price.toFixed(2)} €). Open the Picnic app to order.`, "ok");
+    msg("reviewMsg", `Done. Your cart has ${r.total_count} items (about ${r.total_price.toFixed(2)} €). Open the Picnic app to order.${r.warning ? " " + r.warning : ""}`, "ok");
   } catch (err) { msg("reviewMsg", err.message, "err"); }
   $("cartBtn").disabled = false;
 };

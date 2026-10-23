@@ -103,10 +103,10 @@ def picnic_login(body: LoginBody):
 @app.post("/api/picnic/2fa")
 def picnic_2fa(body: CodeBody):
     try:
-        picnic.verify_2fa(body.code)
+        warning = picnic.verify_2fa(body.code)
     except Picnic2FAError as e:
         raise HTTPException(400, str(e))
-    return {"ok": True}
+    return {"ok": True, "warning": warning}
 
 
 @app.post("/api/picnic/logout")
@@ -198,10 +198,14 @@ def add_to_cart(body: CartBody):
         if line.count > 0:
             api.add_product(line.product_id, line.count)
             mappings[line.ingredient] = line.product_id
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    MAPPING_FILE.write_text(json.dumps(mappings, indent=2, ensure_ascii=False))
+    warning = None
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        MAPPING_FILE.write_text(json.dumps(mappings, indent=2, ensure_ascii=False))
+    except OSError as e:  # the cart is already filled; only remembering choices failed
+        warning = f"Added to cart, but product choices could not be saved ({e})."
     cart = api.get_cart()
-    return {"total_count": cart.total_count, "total_price": (cart.total_price or 0) / 100}
+    return {"total_count": cart.total_count, "total_price": (cart.total_price or 0) / 100, "warning": warning}
 
 
 @app.get("/health")
