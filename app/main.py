@@ -1,4 +1,4 @@
-"""Web app: pick Mealie recipes -> review matched Picnic products -> fill the Picnic cart."""
+"""Web app: pick Mealie or Norish recipes -> review matched Picnic products -> fill the Picnic cart."""
 from __future__ import annotations
 
 import base64
@@ -44,11 +44,12 @@ async def basic_auth(request: Request, call_next):
     return await call_next(request)
 
 
-def mealie() -> core.Mealie:
-    url, token = os.environ.get("MEALIE_URL"), os.environ.get("MEALIE_TOKEN")
-    if not (url and token):
-        raise HTTPException(503, "MEALIE_URL and MEALIE_TOKEN are not configured.")
-    return core.Mealie(url, token)
+def mealie():
+    """The configured recipe source: Norish (NORISH_URL/NORISH_TOKEN) or Mealie (MEALIE_URL/MEALIE_TOKEN)."""
+    src = core.make_source()
+    if src is None:
+        raise HTTPException(503, "Set NORISH_URL and NORISH_TOKEN, or MEALIE_URL and MEALIE_TOKEN.")
+    return src
 
 
 def need_picnic():
@@ -86,7 +87,9 @@ def skip_set() -> set[str]:
 @app.get("/api/status")
 def status():
     return {
-        "mealie_configured": bool(os.environ.get("MEALIE_URL") and os.environ.get("MEALIE_TOKEN")),
+        "mealie_configured": core.source_name() is not None,   # kept for older front ends
+        "source_configured": core.source_name() is not None,
+        "source": core.source_name(),
         "picnic_logged_in": picnic.logged_in(),
         "default_country": os.environ.get("PICNIC_COUNTRY", "DE"),
     }

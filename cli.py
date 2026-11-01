@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Command-line version: Mealie recipes / meal plan / shopping list -> Picnic cart.
+"""Command-line version: Mealie or Norish recipes / meal plan / shopping list -> Picnic cart.
 
 Preview by default; --apply really fills the cart. Never checks out.
-Env: MEALIE_URL, MEALIE_TOKEN, PICNIC_USER, PICNIC_PASSWORD (first login), PICNIC_COUNTRY (DE).
+Env: NORISH_URL + NORISH_TOKEN or MEALIE_URL + MEALIE_TOKEN, PICNIC_USER, PICNIC_PASSWORD (first login), PICNIC_COUNTRY (DE).
 """
 import argparse
 import os
@@ -42,19 +42,18 @@ def picnic_client(country: str) -> PicnicAPI:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--recipe", action="append", default=[], metavar="SLUG", help="Mealie recipe slug (repeatable)")
+    ap.add_argument("--recipe", action="append", default=[], metavar="SLUG", help="Mealie recipe slug or Norish recipe id (repeatable)")
     ap.add_argument("--mealplan", type=int, metavar="DAYS", help="meal plan for the next N days")
-    ap.add_argument("--shopping-list", metavar="NAME_OR_ID")
+    ap.add_argument("--shopping-list", metavar="NAME_OR_ID",
+                    help="Mealie shopping list; for Norish 'all' or a store name")
     ap.add_argument("--apply", action="store_true", help="really add to the Picnic cart")
     ap.add_argument("--country", default=os.environ.get("PICNIC_COUNTRY", "DE"))
     args = ap.parse_args(argv)
     if not (args.recipe or args.mealplan or args.shopping_list):
         ap.error("pick a source: --recipe, --mealplan or --shopping-list")
-    for var in ("MEALIE_URL", "MEALIE_TOKEN"):
-        if not os.environ.get(var):
-            raise SystemExit(f"Missing environment variable {var}")
-
-    mealie = core.Mealie(os.environ["MEALIE_URL"], os.environ["MEALIE_TOKEN"])
+    mealie = core.make_source()
+    if mealie is None:
+        raise SystemExit("Set NORISH_URL and NORISH_TOKEN, or MEALIE_URL and MEALIE_TOKEN.")
     merged = core.aggregate(core.collect_ingredients(mealie, args.recipe, args.shopping_list, args.mealplan))
     merged = {k: v for k, v in merged.items() if k not in core.DEFAULT_SKIP}
     api = picnic_client(args.country)

@@ -1,11 +1,12 @@
 # meali2picnic
 
-A small self-hosted web app: pick recipes from [Mealie](https://mealie.io), review the matching
+A small self-hosted web app: pick recipes from [Mealie](https://mealie.io) or
+[Norish](https://github.com/norish-recipes/norish), review the matching
 [Picnic](https://picnic.app) products, and fill your Picnic cart in one go.
 It **never checks out**. You review the cart and order in the Picnic app.
 
 1. Log in to Picnic (SMS code if asked)
-2. Tick recipes, and/or choose a Mealie shopping list or the next N days of your meal plan
+2. Tick recipes, and/or choose a Mealie shopping list / Norish grocery list or the next N days of your meal plan
 3. Check the matched products and quantities, change anything, then "Add to Picnic cart"
 
 Duplicate ingredients across recipes are merged, amounts are converted to g/ml and rounded up
@@ -16,7 +17,7 @@ remembered per ingredient. Salt, pepper and water are skipped.
 ## Run with Docker
 
 ```bash
-cp .env.example .env      # fill in MEALIE_URL, MEALIE_TOKEN, and APP_PASSWORD
+cp .env.example .env      # fill in MEALIE_* or NORISH_*, and APP_PASSWORD
 docker compose up -d --build
 ```
 
@@ -26,6 +27,8 @@ Open http://localhost:8080.
 |---|---|
 | `MEALIE_URL` | Your Mealie base URL. Must be reachable from the container (same compose network: `http://mealie:9000`) |
 | `MEALIE_TOKEN` | Mealie: user profile, API Tokens |
+| `NORISH_URL` | Use Norish instead of Mealie: your Norish base URL (e.g. `http://norish:3000`). If set, it wins over Mealie |
+| `NORISH_TOKEN` | Norish: Settings, User, API keys |
 | `PICNIC_COUNTRY` | `DE` (default), `NL` or `FR` |
 | `TRANSLATE_INGREDIENTS` | `en-de` (default) translates ingredient names for the Picnic search, `off` disables it |
 | `APP_USER` / `APP_PASSWORD` | HTTP Basic auth for the whole app. **Set a password** unless it is only reachable from your own machine |
@@ -34,6 +37,18 @@ Open http://localhost:8080.
 choices. Anyone who can open the app can use your Picnic session, so keep the port off the
 internet or put it behind a reverse proxy with HTTPS. Extra ingredients to ignore can be added to
 `data/skip.txt`, one per line.
+
+## Norish
+
+Set `NORISH_URL` and `NORISH_TOKEN` instead of the Mealie variables. Everything else works the same:
+
+- **Grocery list:** Norish has one grocery list. The dropdown offers "All groceries" plus one entry
+  per Norish store, so if you assign items to a store called "Picnic" you can send only those.
+  Items you ticked off in Norish are skipped.
+- **Recipes:** search and tick recipes as with Mealie (the CLI's `--recipe` takes the Norish recipe id).
+- **Meal plan:** the next N days, taken from Norish's "this week" and "this month" views, so a range
+  that runs past the end of both is cut short.
+- Norish allows 500 API requests an hour per key, plenty for this.
 
 ## Translation (English recipes, German Picnic)
 
@@ -64,6 +79,7 @@ The same logic is available without the web UI:
 
 ```bash
 pip install -r requirements.txt
+# with Norish, use NORISH_URL=... NORISH_TOKEN=... instead of the MEALIE_* variables
 MEALIE_URL=... MEALIE_TOKEN=... PICNIC_USER=... PICNIC_PASSWORD=... \
   python cli.py --recipe spaghetti-bolognese --mealplan 7            # preview
   python cli.py --recipe spaghetti-bolognese --mealplan 7 --apply    # fill the cart
