@@ -6,8 +6,10 @@ services:
     ports:
       - "8080:8080"
     environment:
-      MEALIE_URL: ${MEALIE_URL}          # e.g. http://mealie:9000 or https://mealie.example.com
-      MEALIE_TOKEN: ${MEALIE_TOKEN}      # Mealie -> user profile -> API Tokens
+      MEALIE_URL: ${MEALIE_URL:-}          # e.g. http://mealie:9000 or https://mealie.example.com
+      MEALIE_TOKEN: ${MEALIE_TOKEN:-}      # Mealie -> user profile -> API Tokens
+      NORISH_URL: ${NORISH_URL:-}        # or use Norish instead, e.g. http://norish:3000
+      NORISH_TOKEN: ${NORISH_TOKEN:-}    # Norish -> Settings -> User -> API keys
       PICNIC_COUNTRY: ${PICNIC_COUNTRY:-DE}
       TRANSLATE_INGREDIENTS: ${TRANSLATE_INGREDIENTS:-en-de}   # off = search Picnic with the names as written
       APP_USER: ${APP_USER:-admin}

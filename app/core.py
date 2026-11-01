@@ -1,7 +1,8 @@
-"""Shared logic: Mealie client, ingredient parsing/merging, Picnic pack maths."""
+"""Shared logic: Mealie/Norish clients, ingredient parsing/merging, Picnic pack maths."""
 from __future__ import annotations
 
 import math
+import os
 import re
 from collections import OrderedDict
 from datetime import date, timedelta
@@ -48,16 +49,113 @@ class Mealie:
         raise KeyError(f"No Mealie shopping list '{name_or_id}'")
 
 
+# ---------------------------------------------------------------- Norish
+
+
+class Norish:
+    """Norish (https://github.com/norish-recipes/norish) behind the same interface as Mealie.
+
+    Recipes, groceries and meal-plan entries are converted to Mealie's field names, so the rest
+    of the app does not care which one it talks to. A recipe's "slug" is its Norish id.
+    Norish has one grocery list; it is offered as "All groceries" plus one list per store.
+    """
+
+    ALL = "all"
+
+    def __init__(self, base_url: str, token: str):
+        self.base = base_url.rstrip("/") + "/api/v1"
+        self.s = requests.Session()
+        self.s.headers["x-api-key"] = token
+
+    def _get(self, path: str, **params):
+        r = self.s.get(self.base + path, params=params, timeout=30)
+        r.raise_for_status()
+        return r.json()
+
+    def _post(self, path: str, body: dict):
+        r = self.s.post(self.base + path, json=body, timeout=30)
+        r.raise_for_status()
+        return r.json()
+
+    @staticmethod
+    def _ingredient(ing: dict) -> dict:
+        unit = ing.get("unit") or ""
+        return {"food": {"name": ing.get("ingredientName") or ""}, "unit": {"name": unit},
+                "quantity": ing.get("amount"),
+                "display": " ".join(str(x) for x in (_fmt(ing.get("amount")), unit, ing.get("ingredientName")) if x)}
+
+    def recipe(self, slug: str) -> dict:
+        r = self._get(f"/recipes/{slug}")
+        return {"slug": r["id"], "name": r.get("name"),
+                "recipeIngredient": [self._ingredient(i) for i in r.get("recipeIngredients", [])]}
+
+    def search_recipes(self, text: str = "", limit: int = 30) -> list[dict]:
+        body = {"limit": limit, "sortMode": "titleAsc"}
+        if text:
+            body["search"] = text
+        return [{"slug": r["id"], "name": r["name"]} for r in self._post("/recipes/search", body).get("recipes", [])]
+
+    def mealplan_recipes(self, start: date, end: date) -> list[dict]:
+        # Norish only offers today / this week / this month, so take week + month and filter.
+        seen, out = set(), []
+        for span in ("week", "month"):
+            for e in self._get(f"/planned-recipes/{span}"):
+                if e["id"] in seen or not (start.isoformat() <= (e.get("date") or "")[:10] <= end.isoformat()):
+                    continue
+                seen.add(e["id"])
+                out.append({"slug": e["recipeId"], "name": e.get("recipeName")})
+        return out
+
+    def shopping_lists(self) -> list[dict]:
+        stores = [{"id": s["id"], "name": s.get("name") or s["id"]} for s in self._get("/stores")]
+        return [{"id": self.ALL, "name": "All groceries"}] + stores
+
+    def shopping_list(self, name_or_id: str) -> dict:
+        lists = self.shopping_lists()
+        match = next((sl for sl in lists if name_or_id in (sl["id"], sl["name"])), None)
+        if not match:
+            raise KeyError(f"No Norish grocery list or store '{name_or_id}'")
+        items = []
+        for g in self._get("/groceries"):
+            if match["id"] != self.ALL and g.get("storeId") != match["id"]:
+                continue
+            unit = g.get("unit") or ""
+            # Same rule as Norish itself: without a unit, purchaseAmount is the number to buy.
+            qty = g.get("amount") if unit else (g.get("purchaseAmount") or g.get("amount"))
+            items.append({"checked": g.get("isDone"), "food": {"name": g.get("name") or ""},
+                          "unit": {"name": unit}, "quantity": qty,
+                          "display": " ".join(str(x) for x in (_fmt(qty), unit, g.get("name")) if x)})
+        return {"id": match["id"], "name": match["name"], "listItems": items}
+
+
+def _fmt(qty) -> str:
+    return f"{qty:g}" if isinstance(qty, (int, float)) and qty else ""
+
+
+def make_source():
+    """Pick Mealie or Norish from the environment. Returns None if neither is configured."""
+    if os.environ.get("NORISH_URL") and os.environ.get("NORISH_TOKEN"):
+        return Norish(os.environ["NORISH_URL"], os.environ["NORISH_TOKEN"])
+    if os.environ.get("MEALIE_URL") and os.environ.get("MEALIE_TOKEN"):
+        return Mealie(os.environ["MEALIE_URL"], os.environ["MEALIE_TOKEN"])
+    return None
+
+
+def source_name() -> str | None:
+    s = make_source()
+    return None if s is None else type(s).__name__
+
+
 def _name(obj) -> str:
     return ((obj or {}).get("name") or "") if isinstance(obj, dict) else ""
 
 
 UNIT_ALIASES = {
     "gram": "g", "gramm": "g", "grams": "g", "g": "g",
-    "kilogram": "kg", "kilo": "kg", "kg": "kg",
-    "milliliter": "ml", "millilitre": "ml", "ml": "ml",
-    "liter": "l", "litre": "l", "l": "l",
-    "cl": "cl", "dl": "dl",
+    "kilogram": "kg", "kilograms": "kg", "kilo": "kg", "kg": "kg",
+    "milliliter": "ml", "milliliters": "ml", "millilitre": "ml", "ml": "ml",
+    "liter": "l", "liters": "l", "litre": "l", "l": "l",
+    "centiliter": "cl", "cl": "cl", "deciliter": "dl", "dl": "dl",   # Norish uses the long ids
 }
 TO_BASE = {"kg": ("g", 1000), "l": ("ml", 1000), "cl": ("ml", 10), "dl": ("ml", 100)}
 
@@ -104,7 +202,7 @@ def aggregate(ingredients: list[dict]) -> "OrderedDict[str, dict]":
     return merged
 
 
-def collect_ingredients(mealie: Mealie, slugs=(), shopping_list: str | None = None,
+def collect_ingredients(mealie: "Mealie | Norish", slugs=(), shopping_list: str | None = None,
                         mealplan_days: int | None = None) -> list[dict]:
     recipes = [mealie.recipe(s) for s in slugs]
     if mealplan_days:

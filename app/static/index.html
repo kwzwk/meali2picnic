@@ -57,7 +57,7 @@
 <body>
 <main>
   <h1>meali<span>2</span>picnic</h1>
-  <p class="sub">Pick Mealie recipes, check the matched Picnic products, fill your Picnic cart. You still place the order in the Picnic app.</p>
+  <p class="sub">Pick Mealie or Norish recipes, check the matched Picnic products, fill your Picnic cart. You still place the order in the Picnic app.</p>
 
   <section id="login" class="hidden">
     <h2><span class="n">1</span> Connect Picnic</h2>
@@ -154,13 +154,13 @@ async function init() {
   $("country").value = s.default_country;
   $("login").classList.toggle("hidden", s.picnic_logged_in);
   $("logout").classList.toggle("hidden", !s.picnic_logged_in);
-  if (!s.mealie_configured) {
-    msg("pickMsg", "MEALIE_URL / MEALIE_TOKEN are not set on the server.", "err");
+  if (!s.source_configured) {
+    msg("pickMsg", "Set NORISH_URL / NORISH_TOKEN or MEALIE_URL / MEALIE_TOKEN on the server.", "err");
   }
   $("pick").classList.toggle("hidden", !s.picnic_logged_in);
   $("trans").classList.toggle("hidden", !s.picnic_logged_in);
   if (s.picnic_logged_in) loadTranslations();
-  if (s.picnic_logged_in && s.mealie_configured) { loadRecipes(); loadLists(); }
+  if (s.picnic_logged_in && s.source_configured) { loadRecipes(); loadLists(); }
 }
 
 $("loginForm").onsubmit = async (e) => {
