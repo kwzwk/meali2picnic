@@ -31,6 +31,8 @@ Open http://localhost:8080.
 | `NORISH_TOKEN` | Norish: Settings, User, API keys |
 | `PICNIC_COUNTRY` | `DE` (default), `NL` or `FR` |
 | `TRANSLATE_INGREDIENTS` | `en-de` (default) translates ingredient names for the Picnic search, `off` disables it |
+| `AMAZON_DOMAIN` | Amazon store for pantry items, `amazon.de` (default), `amazon.nl`, ... or `off` to hide it |
+| `AMAZON_ASSOCIATE_TAG` | Optional. Only needed if Amazon refuses the cart link without one (see below) |
 | `ANTHROPIC_API_KEY` | Optional. Claude translates names the dictionary doesn't know (see below) |
 | `DEEPL_API_KEY` | Optional. DeepL does it instead (the free API key works) |
 | `AUTO_TRANSLATE` | `auto` (default: Claude if its key is set, else DeepL, else nothing), `claude`, `deepl` or `off` |
@@ -53,6 +55,28 @@ Set `NORISH_URL` and `NORISH_TOKEN` instead of the Mealie variables. Everything 
 - **Meal plan:** the next N days, taken from Norish's "this week" and "this month" views, so a range
   that runs past the end of both is cut short.
 - Norish allows 500 API requests an hour per key, plenty for this.
+
+## Amazon (pantry items)
+
+Fresh food goes to Picnic, but pantry, drugstore and household items can go to an Amazon cart.
+Amazon has no API that lets this app search products or fill your cart, so it works like this:
+
+1. Choose what to buy as usual and press **Find Picnic products**. Every item you have matched to an
+   Amazon product before goes to the Amazon table automatically, the rest to Picnic. To move an item,
+   press "buy on Amazon instead" under it (or "back to Picnic next time" in the Amazon table).
+   **Send to Amazon instead** puts everything in the Amazon table and works without a Picnic login.
+2. For each item without a product yet, press **Find on Amazon**, open the product you want and paste
+   its link (or the ASIN) into the row. The choice is remembered in `data/amazon.json`, so next time the
+   item is ready straight away.
+3. Press **Open Amazon cart**. Amazon opens with all matched items and quantities and asks you to confirm
+   adding them to your cart. Nothing is ordered.
+
+Piece counts are taken as the quantity (3 cans gives 3), anything weighed or measured starts at 1 pack.
+Short links like `amzn.eu/d/...` don't contain the product id; open them first and copy the full link.
+
+This uses Amazon's [Add-to-Cart form](https://webservices.amazon.com/paapi5/documentation/add-to-cart-form.html)
+link. Amazon documents it for affiliates; if it ever refuses a link without an affiliate tag, set
+`AMAZON_ASSOCIATE_TAG` to your own Associates tag.
 
 ## Translation (English recipes, German Picnic)
 
@@ -131,6 +155,6 @@ DATA_DIR=./data uvicorn app.main:app --reload --port 8080
   Picnic can change its API without notice.
 - Product matching starts from a text search on the ingredient name, so clean Mealie food names
   ("Zwiebel", not "2 mittelgroße Zwiebeln, gewürfelt") match best. Always glance at the review step.
-- Tested offline against mocked responses, not against live Mealie/Picnic accounts.
+- Tested offline against mocked responses, not against live Mealie/Picnic/Amazon accounts.
 
 - Needs Python 3.13 or newer (required by `python-picnic-api2`); the Docker image already uses it.
