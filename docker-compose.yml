@@ -14,6 +14,9 @@ services:
       TRANSLATE_INGREDIENTS: ${TRANSLATE_INGREDIENTS:-en-de}   # off = search Picnic with the names as written
       AMAZON_DOMAIN: ${AMAZON_DOMAIN:-amazon.de}   # Amazon cart for pantry items; off to hide it
       AMAZON_ASSOCIATE_TAG: ${AMAZON_ASSOCIATE_TAG:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}   # optional: Claude translates unknown ingredient names
+      DEEPL_API_KEY: ${DEEPL_API_KEY:-}           # optional: or DeepL (the free key works)
+      AUTO_TRANSLATE: ${AUTO_TRANSLATE:-auto}     # auto, claude, deepl or off
       APP_USER: ${APP_USER:-admin}
       APP_PASSWORD: ${APP_PASSWORD:-}    # set this if the app is reachable beyond your own machine
     volumes:

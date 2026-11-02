@@ -138,9 +138,9 @@
   <section id="trans" class="hidden">
     <details class="trans" id="transBox">
       <summary id="transSummary">Translations to review</summary>
-      <p class="muted">Ingredient names the dictionary doesn't know yet are searched as written.
+      <p class="muted" id="transHelp">Ingredient names the dictionary doesn't know yet are searched as written.
         Enter the German name and save, or press "Keep as is" if the name is already fine.</p>
-      <div class="row"><button class="ghost" id="keepFound" type="button">Keep as is everything that already finds products</button></div>
+      <div class="row"><button class="ghost" id="keepFound" type="button">Confirm everything that already finds products</button></div>
       <div id="transList"></div>
     </details>
   </section>
@@ -183,6 +183,10 @@ async function init() {
   $("amzPlanBtn").classList.toggle("hidden", !amazonDomain);
   $("pick").classList.toggle("hidden", !(s.picnic_logged_in || amazonDomain));
   $("trans").classList.toggle("hidden", !s.picnic_logged_in);
+  if (s.auto_translate) {
+    $("transHelp").textContent = `Names the dictionary doesn't know are translated automatically (${s.auto_translate}). ` +
+      "Check the suggestion: Save keeps it (or your correction) in your dictionary, \"Keep as is\" keeps the English name.";
+  }
   if (s.picnic_logged_in) loadTranslations();
   if ((s.picnic_logged_in || amazonDomain) && s.source_configured) { loadRecipes(); loadLists(); }
 }
@@ -253,7 +257,7 @@ $("planBtn").onclick = async () => {
 function renderTranslations(list) {
   $("transSummary").textContent = list.length ? `Translations to review (${list.length})` : "Translations to review (none)";
   $("transList").replaceChildren(...list.map((t) => {
-    const input = el("input", { type: "text", placeholder: "German name", className: "grow" });
+    const input = el("input", { type: "text", placeholder: "German name", className: "grow", value: t.suggestion || "" });
     const save = async (german) => {
       try { renderTranslations((await api("/api/translations", { english: t.name, german })).untranslated); }
       catch (err) { msg("transMsg", err.message, "err"); }
@@ -266,6 +270,7 @@ function renderTranslations(list) {
     return el("div", { className: "tr-row" },
       el("span", { className: "nm" }, t.name),
       el("span", { className: "tag" + (t.found ? "" : " bad") }, t.found ? "finds products" : "no match"),
+      t.suggestion ? el("span", { className: "tag" }, "auto") : "",
       input, saveBtn, keep);
   }), el("div", { id: "transMsg", className: "muted" }));
 }
@@ -300,18 +305,21 @@ function renderPlan() {
       note.textContent = "Searching…";
       try {
         const r = await api("/api/research", { ingredient: row.ingredient, term: again.value.trim(), amounts: row.amounts });
-        Object.assign(row, { candidates: r.candidates, selected: r.selected, count: r.count, note: r.note, search_term: r.search_term });
+        Object.assign(row, { candidates: r.candidates, selected: r.selected, count: r.count, note: r.note, search_term: r.search_term, translation: "manual" });
         productOptions(sel, row);
         qty.value = row.count;
         note.textContent = row.note || "";
         termLine.textContent = `searched: ${row.search_term}`;
         remember.style.display = row.candidates.length && row.search_term !== row.ingredient ? "" : "none";
+        badge.textContent = "";
       } catch (err) { note.textContent = err.message; }
     };
     const termLine = el("div", { className: "muted" },
       row.search_term && row.search_term !== row.ingredient ? `searched: ${row.search_term}` : "");
-    const badge = el("div", { className: "note" }, row.translated === false ? "not in dictionary" : "");
-    const remember = el("button", { type: "button", className: "ghost", style: "display:none;margin-top:6px" }, "Remember as translation");
+    const badge = el("div", { className: row.translation === "auto" ? "muted" : "note" },
+      row.translation === "auto" ? "auto-translated" : row.translated === false ? "not in dictionary" : "");
+    const remember = el("button", { type: "button", className: "ghost", style: "margin-top:6px" }, "Remember as translation");
+    remember.style.display = row.translation === "auto" && row.candidates.length ? "" : "none";
     remember.onclick = async () => {
       try {
         await api("/api/translations", { english: row.ingredient, german: row.search_term });
@@ -331,7 +339,8 @@ function renderPlan() {
       };
     }
     return el("tr", {},
-      el("td", {}, row.ingredient, termLine, badge, row.remembered ? el("div", { className: "muted" }, "remembered") : "",
+      el("td", {}, row.ingredient, termLine, badge, row.remembered
+        ? el("div", { className: "muted" }, row.remembered_by === "search term" ? `remembered for “${row.search_term}”` : "remembered") : "",
         toAmazon ? el("div", {}, toAmazon) : ""),
       el("td", {}, row.needed),
       el("td", {}, sel, note, again, remember),
@@ -341,7 +350,7 @@ function renderPlan() {
 
 $("cartBtn").onclick = async () => {
   const lines = plan.filter((r) => r.selected && r.count > 0)
-    .map((r) => ({ ingredient: r.ingredient, product_id: r.selected, count: r.count }));
+    .map((r) => ({ ingredient: r.ingredient, product_id: r.selected, count: r.count, search_term: r.search_term || "" }));
   if (!lines.length) return msg("reviewMsg", "Nothing to add.", "err");
   $("cartBtn").disabled = true;
   msg("reviewMsg", "Adding…");
