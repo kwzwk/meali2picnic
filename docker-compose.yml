@@ -12,6 +12,8 @@ services:
       NORISH_TOKEN: ${NORISH_TOKEN:-}    # Norish -> Settings -> User -> API keys
       PICNIC_COUNTRY: ${PICNIC_COUNTRY:-DE}
       TRANSLATE_INGREDIENTS: ${TRANSLATE_INGREDIENTS:-en-de}   # off = search Picnic with the names as written
+      AMAZON_DOMAIN: ${AMAZON_DOMAIN:-amazon.de}   # Amazon cart for pantry items; off to hide it
+      AMAZON_ASSOCIATE_TAG: ${AMAZON_ASSOCIATE_TAG:-}
       APP_USER: ${APP_USER:-admin}
       APP_PASSWORD: ${APP_PASSWORD:-}    # set this if the app is reachable beyond your own machine
     volumes:

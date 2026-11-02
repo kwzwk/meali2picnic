@@ -12,13 +12,14 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import core
+from . import amazon, core
 from .dictionary import Dictionary
 from .picnic_session import DATA_DIR, Picnic2FAError, PicnicSession
 
 app = FastAPI(title="meali2picnic")
 STATIC = Path(__file__).parent / "static"
 MAPPING_FILE = DATA_DIR / "mappings.json"   # ingredient name -> Picnic product id
+AMAZON_FILE = DATA_DIR / "amazon.json"      # ingredient name -> {"asin", "title"}
 SKIP_FILE = DATA_DIR / "skip.txt"           # extra ingredients to ignore, one per line
 picnic = PicnicSession()
 
@@ -92,6 +93,7 @@ def status():
         "source": core.source_name(),
         "picnic_logged_in": picnic.logged_in(),
         "default_country": os.environ.get("PICNIC_COUNTRY", "DE"),
+        "amazon_domain": amazon.domain() or None,
     }
 
 
@@ -276,6 +278,111 @@ def add_to_cart(body: CartBody):
         warning = f"Added to cart, but product choices could not be saved ({e})."
     cart = api.get_cart()
     return {"total_count": cart.total_count, "total_price": (cart.total_price or 0) / 100, "warning": warning}
+
+
+# ------------------------------------------------------------------ Amazon (pantry items)
+
+
+def need_amazon():
+    if not amazon.enabled():
+        raise HTTPException(404, "Amazon is turned off (AMAZON_DOMAIN=off).")
+
+
+def save_json(path: Path, data: dict) -> str | None:
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        return None
+    except OSError as e:
+        return f"Could not save to {path} ({e}). Make {DATA_DIR} writable for uid 10001."
+
+
+def amazon_row(name: str, amounts: dict, mapping: dict | None) -> dict:
+    term, _ = search_term(name)
+    asin = (mapping or {}).get("asin")
+    return {
+        "ingredient": name,
+        "needed": core.describe_amounts(amounts),
+        "amounts": amounts,
+        "asin": asin,
+        "title": (mapping or {}).get("title") or "",
+        "product_url": amazon.product_url(asin) if asin else None,
+        "search_url": amazon.search_url(term),
+        "count": amazon.default_count(amounts) if asin else 0,
+    }
+
+
+@app.post("/api/amazon/plan")
+def amazon_plan(body: PlanBody):
+    """List the chosen items with their remembered Amazon product. Needs no Picnic login."""
+    need_amazon()
+    if not (body.recipes or body.shopping_list or body.mealplan_days):
+        raise HTTPException(400, "Choose at least one recipe, a shopping list or a meal-plan range.")
+    try:
+        ings = core.collect_ingredients(mealie(), body.recipes, body.shopping_list, body.mealplan_days)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    skip = skip_set()
+    mappings = load_json(AMAZON_FILE)
+    rows = []
+    for name, entry in core.aggregate(ings).items():
+        if name in skip:
+            continue
+        row = amazon_row(name, entry["amounts"], mappings.get(name))
+        row["from"] = entry["displays"]
+        rows.append(row)
+    return {"rows": rows, "domain": amazon.domain()}
+
+
+class AmazonMapBody(BaseModel):
+    ingredient: str
+    product: str = ""          # ASIN or Amazon product link; empty forgets the mapping
+    title: str = ""
+    amounts: dict[str, float] = {}
+
+
+@app.post("/api/amazon/map")
+def amazon_map(body: AmazonMapBody):
+    """Remember which Amazon product to buy for an ingredient."""
+    need_amazon()
+    mappings = load_json(AMAZON_FILE)
+    name = body.ingredient.strip().lower()
+    if body.product.strip():
+        asin = amazon.extract_asin(body.product)
+        if not asin:
+            raise HTTPException(400, "That is not an ASIN or an Amazon product link (it should contain /dp/…).")
+        mappings[name] = {"asin": asin, "title": body.title.strip()[:120]}
+    else:
+        mappings.pop(name, None)
+    error = save_json(AMAZON_FILE, mappings)
+    if error:
+        raise HTTPException(500, error)
+    return amazon_row(name, body.amounts, mappings.get(name))
+
+
+class AmazonLine(BaseModel):
+    asin: str
+    count: int
+
+
+class AmazonCartBody(BaseModel):
+    lines: list[AmazonLine]
+
+
+@app.post("/api/amazon/cart")
+def amazon_cart(body: AmazonCartBody):
+    """Build the Amazon add-to-cart link. Opening it lets you confirm the items on Amazon."""
+    need_amazon()
+    lines = []
+    for line in body.lines:
+        asin = amazon.extract_asin(line.asin)
+        if not asin:
+            raise HTTPException(400, f"Invalid ASIN: {line.asin}")
+        if line.count > 0:
+            lines.append((asin, min(line.count, 99)))
+    if not lines:
+        raise HTTPException(400, "Nothing to add.")
+    return {"url": amazon.cart_url(lines), "items": len(lines)}
 
 
 @app.get("/health")
