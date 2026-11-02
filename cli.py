@@ -12,7 +12,9 @@ from pathlib import Path
 from python_picnic_api2 import PicnicAPI
 from python_picnic_api2.session import Picnic2FARequired
 
-from app import core
+from app import core, matching
+from app.autotranslate import make_backend
+from app.dictionary import Dictionary
 
 TOKEN_FILE = Path(os.environ.get("DATA_DIR", Path.home() / ".config" / "meali2picnic")) / "picnic_token"
 
@@ -58,13 +60,19 @@ def main(argv=None):
     merged = {k: v for k, v in merged.items() if k not in core.DEFAULT_SKIP}
     api = picnic_client(args.country)
 
+    translate_on = os.environ.get("TRANSLATE_INGREDIENTS", "en-de").lower() == "en-de"
+    dictionary = Dictionary(TOKEN_FILE.parent, make_backend() if translate_on else None)
+    terms = dictionary.translate_all(list(merged)) if translate_on else {n: (n, "off") for n in merged}
     plan = []
     for name, entry in merged.items():
-        hits = api.search(name).items
+        hits, term = matching.search(api, terms[name][0], name)
+        hits, best = matching.rank(term, hits, entry["amounts"])
         if not hits:
-            print(f"  no Picnic match: {name}")
+            print(f"  no Picnic match: {name} (searched {term})")
             continue
         count, note = core.packs_needed(entry["amounts"], hits[0].unit_quantity)
+        if best is not None and best < matching.WEAK:
+            note = "; ".join(x for x in ("unsure match", note) if x)
         plan.append((hits[0], count))
         print(f"  {count} x {hits[0].name}  <- {name} ({core.describe_amounts(entry['amounts'])})" + (f"  [{note}]" if note else ""))
     if not args.apply:

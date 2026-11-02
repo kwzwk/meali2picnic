@@ -3,3 +3,4 @@ uvicorn[standard]>=0.30
 pydantic>=2
 requests>=2.31
 python-picnic-api2>=2.0.1
+anthropic>=2.3

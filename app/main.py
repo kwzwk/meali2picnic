@@ -12,13 +12,15 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import core
+from . import core, matching
+from .autotranslate import make_backend
 from .dictionary import Dictionary
 from .picnic_session import DATA_DIR, Picnic2FAError, PicnicSession
 
 app = FastAPI(title="meali2picnic")
 STATIC = Path(__file__).parent / "static"
 MAPPING_FILE = DATA_DIR / "mappings.json"   # ingredient name -> Picnic product id
+TERM_FILE = DATA_DIR / "term_choices.json"  # German search term -> Picnic product id
 SKIP_FILE = DATA_DIR / "skip.txt"           # extra ingredients to ignore, one per line
 picnic = PicnicSession()
 
@@ -66,7 +68,7 @@ def load_json(path: Path) -> dict:
 
 
 TRANSLATE_ON = os.environ.get("TRANSLATE_INGREDIENTS", "en-de").lower() == "en-de"
-dictionary = Dictionary(DATA_DIR)
+dictionary = Dictionary(DATA_DIR, make_backend() if TRANSLATE_ON else None)
 
 
 def search_term(name: str) -> tuple[str, bool]:
@@ -92,6 +94,7 @@ def status():
         "source": core.source_name(),
         "picnic_logged_in": picnic.logged_in(),
         "default_country": os.environ.get("PICNIC_COUNTRY", "DE"),
+        "auto_translate": dictionary.auto.backend.name if dictionary.auto.enabled else None,
     }
 
 
@@ -139,7 +142,7 @@ def shopping_lists():
     return [{"id": s["id"], "name": s.get("name") or s["id"]} for s in mealie().shopping_lists()]
 
 
-def build_row(api, name: str, amounts: dict, hits, remembered: str | None) -> dict:
+def build_row(api, name: str, amounts: dict, hits, remembered: str | None, best: float | None = None) -> dict:
     cands = [{"id": h.id, "name": h.name, "price": h.display_price, "unit_quantity": h.unit_quantity} for h in hits]
     selected = remembered
     if selected and not any(c["id"] == selected for c in cands):
@@ -153,6 +156,8 @@ def build_row(api, name: str, amounts: dict, hits, remembered: str | None) -> di
         selected = cands[0]["id"]
     chosen = next((c for c in cands if c["id"] == selected), None)
     count, note = core.packs_needed(amounts, chosen["unit_quantity"] if chosen else None)
+    if chosen and selected != remembered and best is not None and best < matching.WEAK:
+        note = "; ".join(x for x in ("unsure match, please check", note) if x)
     return {
         "ingredient": name,
         "needed": core.describe_amounts(amounts),
@@ -174,7 +179,8 @@ class ResearchBody(BaseModel):
 def research(body: ResearchBody):
     """Search Picnic again with a term you typed for one ingredient."""
     api = need_picnic()
-    row = build_row(api, body.ingredient, body.amounts, api.search(body.term).items[:6], None)
+    hits, best = matching.rank(body.term, list(api.search(body.term).items), body.amounts)
+    row = build_row(api, body.ingredient, body.amounts, hits, None, best)
     row["search_term"] = body.term
     return row
 
@@ -231,17 +237,20 @@ def plan(body: PlanBody):
     skip = skip_set()
     merged = {k: v for k, v in core.aggregate(ings).items() if k not in skip}
     mappings = load_json(MAPPING_FILE)
+    term_choices = load_json(TERM_FILE)
+    terms = dictionary.translate_all(list(merged)) if TRANSLATE_ON else {n: (n, "off") for n in merged}
 
     rows = []
     for name, entry in merged.items():
-        term, known = search_term(name)
-        hits = api.search(term).items[:6]
-        if not hits and term != name:         # translation found nothing: try the original wording too
-            hits = api.search(name).items[:6]
-        if not known:
+        term, source = terms[name]
+        hits, term = matching.search(api, term, name)   # falls back to the product noun, then the original
+        if source in ("auto", "none"):
             dictionary.note_unknown(name, bool(hits))
-        row = build_row(api, name, entry["amounts"], hits, mappings.get(name))
-        row.update({"search_term": term, "translated": known, "from": entry["displays"], "remembered": name in mappings})
+        hits, best = matching.rank(term, hits, entry["amounts"])
+        pid, why = matching.remembered(mappings, term_choices, name, term)
+        row = build_row(api, name, entry["amounts"], hits, pid, best)
+        row.update({"search_term": term, "translated": source != "none", "translation": source,
+                    "from": entry["displays"], "remembered": bool(pid), "remembered_by": why})
         rows.append(row)
     return {"rows": rows}
 
@@ -250,6 +259,7 @@ class CartLine(BaseModel):
     ingredient: str
     product_id: str
     count: int
+    search_term: str = ""
 
 
 class CartBody(BaseModel):
@@ -263,15 +273,18 @@ def add_to_cart(body: CartBody):
     api = need_picnic()
     if body.clear_first:
         api.clear_cart()
-    mappings = load_json(MAPPING_FILE)
+    mappings, term_choices = load_json(MAPPING_FILE), load_json(TERM_FILE)
     for line in body.lines:
         if line.count > 0:
             api.add_product(line.product_id, line.count)
             mappings[line.ingredient] = line.product_id
+            if line.search_term.strip():
+                term_choices[line.search_term.strip().lower()] = line.product_id
     warning = None
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         MAPPING_FILE.write_text(json.dumps(mappings, indent=2, ensure_ascii=False))
+        TERM_FILE.write_text(json.dumps(term_choices, indent=2, ensure_ascii=False))
     except OSError as e:  # the cart is already filled; only remembering choices failed
         warning = f"Added to cart, but product choices could not be saved ({e})."
     cart = api.get_cart()

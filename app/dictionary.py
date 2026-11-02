@@ -9,15 +9,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import translate
+from .autotranslate import AutoTranslator
 
 HEADER = "# english = deutsch  (one per line; added by the app or by you)\n"
 
 
 class Dictionary:
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, backend=None):
         self.file = data_dir / "translations.txt"
         self.unknown_file = data_dir / "untranslated.json"
         self.lock = threading.Lock()
+        self.auto = AutoTranslator(data_dir, backend)
 
     # ---- lookup
     def overrides(self) -> dict[str, str]:
@@ -25,6 +27,24 @@ class Dictionary:
 
     def translate(self, name: str) -> tuple[str, bool]:
         return translate.translate_ex(name, self.overrides())
+
+    def translate_all(self, names: list[str]) -> dict[str, tuple[str, str]]:
+        """name -> (search term, source). source is "dictionary", "auto" or "none".
+
+        Your dictionary and the built-in list come first. Whatever they don't know goes to the
+        automatic translator in one batch; anything still unknown is searched as written.
+        """
+        overrides = self.overrides()
+        out, unknown = {}, []
+        for n in names:
+            term, known = translate.translate_ex(n, overrides)
+            out[n] = (term, "dictionary")
+            if not known:
+                unknown.append(n)
+        auto = self.auto.translate_many(unknown) if unknown else {}
+        for n in unknown:
+            out[n] = (auto[n], "auto") if n in auto else (n, "none")
+        return out
 
     # ---- names we could not translate
     def _read_unknown(self) -> dict:
@@ -57,7 +77,9 @@ class Dictionary:
     def untranslated(self) -> list[dict]:
         """Names without a match first, then the ones seen most often."""
         data = self._read_unknown()
-        rows = [{"name": k, "seen": v.get("seen", 1), "found": bool(v.get("found"))} for k, v in data.items()]
+        auto = self.auto.cached()
+        rows = [{"name": k, "seen": v.get("seen", 1), "found": bool(v.get("found")), "suggestion": auto.get(k)}
+                for k, v in data.items()]
         return sorted(rows, key=lambda r: (r["found"], -r["seen"], r["name"]))
 
     # ---- your translations
@@ -85,8 +107,9 @@ class Dictionary:
                 self._write_unknown(data)
 
     def keep_found(self) -> int:
-        """Keep, as written, every unknown name that already finds Picnic products. Returns how many."""
-        names = [r["name"] for r in self.untranslated() if r["found"]]
-        for n in names:
-            self.set(n, n)
-        return len(names)
+        """Confirm every unknown name that already finds Picnic products: its automatic translation
+        if it has one, otherwise the name as written. Returns how many."""
+        rows = [r for r in self.untranslated() if r["found"]]
+        for r in rows:
+            self.set(r["name"], r["suggestion"] or r["name"])
+        return len(rows)

@@ -76,6 +76,7 @@ _DESCRIPTORS = {
     "warm", "plain", "thick", "thin", "crushed", "cubed", "halved", "trimmed", "rinsed", "drained",
     "leaves", "leaf", "sprig", "sprigs", "fillet", "fillets", "florets", "stalk", "stalks", "bunch",
 }
+DESCRIPTORS = _DESCRIPTORS
 
 
 def _parse(text: str) -> dict[str, str]:
