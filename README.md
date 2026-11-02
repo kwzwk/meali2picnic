@@ -57,8 +57,10 @@ Set `NORISH_URL` and `NORISH_TOKEN` instead of the Mealie variables. Everything 
 Fresh food goes to Picnic, but pantry, drugstore and household items can go to an Amazon cart.
 Amazon has no API that lets this app search products or fill your cart, so it works like this:
 
-1. Choose what to buy as usual (tip: put pantry items in a Norish store called "Amazon" and pick that store),
-   then press **Send to Amazon instead**. This does not need a Picnic login.
+1. Choose what to buy as usual and press **Find Picnic products**. Every item you have matched to an
+   Amazon product before goes to the Amazon table automatically, the rest to Picnic. To move an item,
+   press "buy on Amazon instead" under it (or "back to Picnic next time" in the Amazon table).
+   **Send to Amazon instead** puts everything in the Amazon table and works without a Picnic login.
 2. For each item without a product yet, press **Find on Amazon**, open the product you want and paste
    its link (or the ASIN) into the row. The choice is remembered in `data/amazon.json`, so next time the
    item is ready straight away.

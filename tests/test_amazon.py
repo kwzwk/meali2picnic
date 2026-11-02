@@ -72,3 +72,17 @@ def test_amazon_flow_without_picnic_login():
         assert rows["spaghetti"]["asin"] is None
     finally:
         main.picnic.api = saved
+
+
+def test_plan_sends_amazon_matched_items_to_amazon():
+    client.post("/api/amazon/map", json={"ingredient": "spaghetti", "product": "B000FQ3LIQ"})
+    try:
+        r = client.post("/api/plan", json={"recipes": ["pasta"]}).json()
+        assert [x["ingredient"] for x in r["rows"]] == ["zwiebel"]              # Picnic gets the rest
+        assert [x["ingredient"] for x in r["amazon_rows"]] == ["spaghetti"]
+        assert r["amazon_rows"][0]["asin"] == "B000FQ3LIQ" and r["amazon_rows"][0]["count"] == 1
+        assert r["rows"][0]["amazon_search_url"].startswith("https://www.amazon.de/s?k=")
+    finally:
+        client.post("/api/amazon/map", json={"ingredient": "spaghetti", "product": ""})
+    r = client.post("/api/plan", json={"recipes": ["pasta"]}).json()
+    assert {x["ingredient"] for x in r["rows"]} == {"spaghetti", "zwiebel"} and r["amazon_rows"] == []

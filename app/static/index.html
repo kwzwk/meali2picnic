@@ -122,7 +122,8 @@
     <h2><span class="n">A</span> Amazon cart (pantry items)</h2>
     <p class="muted">Amazon can't be searched automatically, so each item is matched once:
       press "Find on Amazon", open the product you want and paste its link (or ASIN) here.
-      Matches are remembered. Items without a product are left out.</p>
+      Matches are remembered, and from then on the item comes here automatically instead of going to Picnic.
+      Items without a product are left out.</p>
     <table>
       <thead><tr><th>Item</th><th>Needed</th><th>Amazon product</th><th>Qty</th></tr></thead>
       <tbody id="amzRows"></tbody>
@@ -240,9 +241,11 @@ $("planBtn").onclick = async () => {
   try {
     const r = await api("/api/plan", { recipes: [...chosen.keys()], shopping_list: $("shopList").value || null, mealplan_days: days });
     plan = r.rows;
+    amzPlan = r.amazon_rows || [];
     renderPlan();
+    if (amzPlan.length) renderAmazon(); else $("amz").classList.add("hidden");
     loadTranslations();
-    msg("pickMsg", `${plan.length} ingredients.`);
+    msg("pickMsg", `${plan.length} for Picnic` + (amzPlan.length ? `, ${amzPlan.length} for Amazon (below).` : "."));
   } catch (err) { msg("pickMsg", err.message, "err"); }
   $("planBtn").disabled = false;
 };
@@ -316,8 +319,20 @@ function renderPlan() {
         loadTranslations();
       } catch (err) { note.textContent = err.message; }
     };
+    let toAmazon = "";
+    if (row.amazon_search_url) {
+      toAmazon = el("a", { href: "#", className: "muted" }, "buy on Amazon instead");
+      toAmazon.onclick = (e) => {
+        e.preventDefault();
+        plan = plan.filter((r) => r !== row);
+        amzPlan.push({ ingredient: row.ingredient, needed: row.needed, amounts: row.amounts, asin: null,
+                       title: "", product_url: null, search_url: row.amazon_search_url, count: 0 });
+        renderPlan(); renderAmazon();
+      };
+    }
     return el("tr", {},
-      el("td", {}, row.ingredient, termLine, badge, row.remembered ? el("div", { className: "muted" }, "remembered") : ""),
+      el("td", {}, row.ingredient, termLine, badge, row.remembered ? el("div", { className: "muted" }, "remembered") : "",
+        toAmazon ? el("div", {}, toAmazon) : ""),
       el("td", {}, row.needed),
       el("td", {}, sel, note, again, remember),
       el("td", {}, qty));
@@ -380,7 +395,16 @@ function renderAmazon() {
           " ", el("span", { className: "muted" }, "remembered")));
         const change = el("a", { href: "#" }, "change");
         change.onclick = (e) => { e.preventDefault(); row.asin = null; draw(); };
-        kids.push(el("div", { className: "muted" }, find, " · ", change));
+        const forget = el("a", { href: "#", title: "Next time this item goes to Picnic again" }, "back to Picnic next time");
+        forget.onclick = async (e) => {
+          e.preventDefault();
+          try {
+            await api("/api/amazon/map", { ingredient: row.ingredient, product: "" });
+            Object.assign(row, { asin: null, title: "", product_url: null, count: 0 });
+            qty.value = 0; draw();
+          } catch (err) { msg("amzMsg", err.message, "err"); }
+        };
+        kids.push(el("div", { className: "muted" }, find, " · ", change, " · ", forget));
       } else {
         kids.push(input, el("div", { className: "muted" }, find), note);
       }

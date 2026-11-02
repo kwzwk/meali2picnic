@@ -233,9 +233,15 @@ def plan(body: PlanBody):
     skip = skip_set()
     merged = {k: v for k, v in core.aggregate(ings).items() if k not in skip}
     mappings = load_json(MAPPING_FILE)
+    amazon_maps = load_json(AMAZON_FILE) if amazon.enabled() else {}
 
-    rows = []
+    rows, amazon_rows = [], []
     for name, entry in merged.items():
+        if name in amazon_maps:               # already matched to an Amazon product: goes there
+            row = amazon_row(name, entry["amounts"], amazon_maps[name])
+            row["from"] = entry["displays"]
+            amazon_rows.append(row)
+            continue
         term, known = search_term(name)
         hits = api.search(term).items[:6]
         if not hits and term != name:         # translation found nothing: try the original wording too
@@ -243,9 +249,10 @@ def plan(body: PlanBody):
         if not known:
             dictionary.note_unknown(name, bool(hits))
         row = build_row(api, name, entry["amounts"], hits, mappings.get(name))
-        row.update({"search_term": term, "translated": known, "from": entry["displays"], "remembered": name in mappings})
+        row.update({"search_term": term, "translated": known, "from": entry["displays"], "remembered": name in mappings,
+                    "amazon_search_url": amazon.search_url(term) if amazon.enabled() else None})
         rows.append(row)
-    return {"rows": rows}
+    return {"rows": rows, "amazon_rows": amazon_rows}
 
 
 class CartLine(BaseModel):
