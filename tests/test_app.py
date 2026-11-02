@@ -282,3 +282,34 @@ def test_api_unknown_names_are_listed_then_taught():
     kept = client.post("/api/translations/keep-found").json()
     assert "hähnchenbrustfilet" not in [u["name"] for u in kept["untranslated"]]
     assert client.post("/api/translations", json={"english": "x", "german": "a;b"}).status_code == 400
+
+
+def test_plan_uses_auto_translation_and_term_memory():
+    class Backend:
+        name = "fake"
+
+        def translate(self, names):
+            return {"poulet fillets, skinless": "Hähnchenbrustfilet"} if "poulet fillets, skinless" in names else {}
+    main.dictionary.auto.backend = Backend()
+    try:
+        RECIPES["auto"] = {"name": "Auto", "slug": "auto", "recipeIngredient": [
+            {"quantity": 400, "unit": {"name": "g"}, "food": {"name": "poulet fillets, skinless"}}]}
+        row = client.post("/api/plan", json={"recipes": ["auto"]}).json()["rows"][0]
+        assert row["translation"] == "auto" and row["search_term"] == "Hähnchenbrustfilet" and row["selected"] == "h1"
+        listed = {u["name"]: u for u in client.get("/api/translations").json()["untranslated"]}
+        assert listed["poulet fillets"]["suggestion"] == "Hähnchenbrustfilet"
+        assert client.get("/api/status").json()["auto_translate"] == "fake"
+    finally:
+        main.dictionary.auto.backend = None
+
+    # A product picked for one ingredient is reused for another one with the same search term.
+    CATALOG["zwiebel"].append(NS(id="z2", name="Rote Zwiebeln", display_price=149, unit_quantity="500 g"))
+    try:
+        client.post("/api/cart", json={"lines": [{"ingredient": "zwiebel", "product_id": "z2", "count": 1,
+                                                   "search_term": "Zwiebel"}]})
+        RECIPES["on"] = {"name": "On", "slug": "on", "recipeIngredient": [
+            {"quantity": 1, "unit": None, "food": {"name": "onion"}}]}
+        row = client.post("/api/plan", json={"recipes": ["on"]}).json()["rows"][0]
+        assert row["selected"] == "z2" and row["remembered_by"] == "search term"
+    finally:
+        CATALOG["zwiebel"].pop()

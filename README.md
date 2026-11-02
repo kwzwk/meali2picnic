@@ -31,6 +31,10 @@ Open http://localhost:8080.
 | `NORISH_TOKEN` | Norish: Settings, User, API keys |
 | `PICNIC_COUNTRY` | `DE` (default), `NL` or `FR` |
 | `TRANSLATE_INGREDIENTS` | `en-de` (default) translates ingredient names for the Picnic search, `off` disables it |
+| `ANTHROPIC_API_KEY` | Optional. Claude translates names the dictionary doesn't know (see below) |
+| `DEEPL_API_KEY` | Optional. DeepL does it instead (the free API key works) |
+| `AUTO_TRANSLATE` | `auto` (default: Claude if its key is set, else DeepL, else nothing), `claude`, `deepl` or `off` |
+| `CLAUDE_MODEL` | Model for the Claude translation, default `claude-opus-5-5` |
 | `APP_USER` / `APP_PASSWORD` | HTTP Basic auth for the whole app. **Set a password** unless it is only reachable from your own machine |
 
 `./data` is mounted at `/data` and holds the Picnic session token and your remembered product
@@ -71,7 +75,35 @@ for "Basilikum". The built-in dictionary covers about 300 common groceries and *
   onion = Gemüsezwiebel
   ```
 - Set `TRANSLATE_INGREDIENTS=off` to turn translation off.
-- Your product choices are remembered per original ingredient name, so a corrected match is reused.
+
+### Automatic translation
+
+Set `ANTHROPIC_API_KEY` (or `DEEPL_API_KEY`) and names the dictionary doesn't know are translated
+automatically instead of being searched in English:
+
+- **Claude** is asked for the term you would type into Picnic's search, not a literal translation:
+  "chicken thighs, boneless" becomes "Hähnchenschenkel", "heavy cream" becomes "Schlagsahne".
+  All unknown names of one shopping run go in a single request, at low effort, so it costs a fraction of a cent.
+- **DeepL** translates the cleaned-up name literally ("large fresh basil leaves" -> "basil" -> "Basilikum").
+- Each name is translated once and cached in `data/auto_translations.json`. Your dictionary
+  (`translations.txt`) and the built-in list always come first.
+- Auto-translated lines say so in the review table and appear under "Translations to review" with the
+  suggestion filled in: Save keeps it (or your correction) in your dictionary. "Confirm everything that
+  already finds products" accepts all suggestions that work in one click.
+- If the service is down or the key is wrong, the name is simply searched as written, as before.
+
+## Product matching
+
+- Picnic's top 10 results are re-ranked. German compound words are read the German way: for "Tomaten",
+  "Rispentomaten" is a good match and "Tomatenmark" a poor one. Processed forms you didn't ask for
+  (Mark, Saft, Pulver, Soße, Chips, Kekse, ...) move down, and a pack size that fits the amount you need
+  with little left over moves up. Picnic's own order breaks ties.
+- If a multi-word term finds nothing, the last word (the product noun) is tried, then the original name:
+  "geräuchertes Paprikapulver" falls back to "Paprikapulver".
+- Lines where even the best product is a poor fit are flagged "unsure match, please check".
+- Your product choices are remembered per ingredient name (also for small spelling differences such as
+  "Red onions" and "red onion") **and per search term**, so the onions you picked for "onion" are also used for
+  "onions, diced" or "Zwiebel". Remembered choices are stored in `data/mappings.json` and `data/term_choices.json`.
 
 ## Command line
 
@@ -97,7 +129,7 @@ DATA_DIR=./data uvicorn app.main:app --reload --port 8080
 
 - Uses the unofficial [`python-picnic-api2`](https://pypi.org/project/python-picnic-api2/) library.
   Picnic can change its API without notice.
-- Product matching is a text search on the ingredient name, so clean Mealie food names
+- Product matching starts from a text search on the ingredient name, so clean Mealie food names
   ("Zwiebel", not "2 mittelgroße Zwiebeln, gewürfelt") match best. Always glance at the review step.
 - Tested offline against mocked responses, not against live Mealie/Picnic accounts.
 
